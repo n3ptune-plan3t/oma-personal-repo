@@ -23,10 +23,7 @@ jobs:
       - id: find-pkgs
         run: |
           mkdir -p packages
-
-          # Locate subfolders containing .spec files
           PKGS=$(find packages -mindepth 2 -maxdepth 2 -name "*.spec" -exec dirname {} \; | xargs -r -n 1 basename | sort -u | jq -R -s -c 'split("\n")[:-1]')
-
           echo "Discovered packages: ${PKGS}"
 
           if [ -z "$PKGS" ] || [ "$PKGS" = "[]" ]; then
@@ -45,56 +42,54 @@ jobs:
       fail-fast: false
       matrix:
         package: ${{ fromJson(needs.discover.outputs.packages) }}
-    container:
-      image: docker.io/openmandriva/cooker
     steps:
-      - name: Install Base Packaging Tooling
-        run: |
-          dnf --refresh -y install \
-            rpm-build \
-            rpm-openmandriva-setup \
-            rpmdevtools \
-            dnf-plugins-core \
-            git \
-            curl \
-            tar \
-            findutils \
-            coreutils
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Prepare Sources & Build Dependencies
+      - name: Build RPM inside OpenMandriva Container
         run: |
-          SPEC_DIR="packages/${{ matrix.package }}"
-          SPEC_FILE=$(find "$SPEC_DIR" -maxdepth 1 -name "*.spec" | head -n 1)
+          mkdir -p dist
+          chmod 777 dist
 
-          if [ -z "$SPEC_FILE" ]; then
-            echo "No .spec file located in $SPEC_DIR"
-            exit 1
-          fi
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            docker.io/openmandriva/cooker /bin/bash -c "
+              set -e
 
-          mkdir -p ~/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+              # 1. Update and install required packaging tools
+              dnf --refresh -y install \
+                rpm-build \
+                rpm-openmandriva-setup \
+                rpmdevtools \
+                dnf-plugins-core \
+                git \
+                curl \
+                tar \
+                findutils \
+                coreutils
 
-          # Copy local sources/patches into SOURCES directory
-          cp -r "$SPEC_DIR"/* ~/rpmbuild/SOURCES/
-          cp "$SPEC_FILE" ~/rpmbuild/SPECS/
+              # 2. Setup build environment
+              SPEC_DIR=\"packages/${{ matrix.package }}\"
+              SPEC_FILE=\$(find \"\$SPEC_DIR\" -maxdepth 1 -name \"*.spec\" | head -n 1)
+              SPEC_BASENAME=\$(basename \"\$SPEC_FILE\")
 
-          SPEC_BASENAME=$(basename "$SPEC_FILE")
+              mkdir -p /root/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
-          # Download remote Source URLs defined in the spec
-          spectool -g -R ~/rpmbuild/SPECS/"$SPEC_BASENAME"
+              # Copy local source files and spec into rpmbuild paths
+              cp -r \"\$SPEC_DIR\"/* /root/rpmbuild/SOURCES/
+              cp \"\$SPEC_FILE\" /root/rpmbuild/SPECS/
 
-          # Install spec-declared dependencies
-          dnf builddep -y ~/rpmbuild/SPECS/"$SPEC_BASENAME"
+              # 3. Fetch remote sources and install build dependencies
+              spectool -g -R /root/rpmbuild/SPECS/\"\$SPEC_BASENAME\"
+              dnf builddep -y /root/rpmbuild/SPECS/\"\$SPEC_BASENAME\"
 
-      - name: Build RPMs
-        run: |
-          SPEC_FILE=$(find ~/rpmbuild/SPECS/ -name "*.spec" | head -n 1)
-          rpmbuild -ba "$SPEC_FILE"
+              # 4. Build binary and source packages
+              rpmbuild -ba /root/rpmbuild/SPECS/\"\$SPEC_BASENAME\"
 
-          mkdir -p dist/
-          find ~/rpmbuild/RPMS/ -type f -name "*.rpm" -exec cp {} dist/ \;
+              # 5. Export built packages to workspace artifact directory
+              find /root/rpmbuild/RPMS/ -type f -name \"*.rpm\" -exec cp {} /workspace/dist/ \;
+            "
 
       - name: Upload Package Artifacts
         uses: actions/upload-artifact@v4
