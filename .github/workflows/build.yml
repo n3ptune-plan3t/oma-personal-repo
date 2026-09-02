@@ -1,0 +1,98 @@
+name: Build OpenMandriva Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+    paths:
+      - 'packages/**'
+  pull_request:
+    paths:
+      - 'packages/**'
+  workflow_dispatch:
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.find-pkgs.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: find-pkgs
+        run: |
+          # Finds all direct package folders under packages/ and outputs as JSON array
+          PKGS=$(find packages -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | jq -R -s -c 'split("\n")[:-1]')
+          echo "packages=${PKGS}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.discover.outputs.packages) }}
+    container:
+      image: docker.io/openmandriva/cooker
+    steps:
+      - name: Install Base Packaging Tooling
+        run: |
+          dnf --refresh -y install \
+            rpm-build \
+            rpm-openmandriva-setup \
+            rpmdevtools \
+            dnf-plugins-core \
+            git \
+            curl \
+            tar
+
+      - name: Checkout Spec Repo
+        uses: actions/checkout@v4
+
+      - name: Prepare Sources & Build Dependencies
+        run: |
+          SPEC_DIR="packages/${{ matrix.package }}"
+          SPEC_FILE=$(find "$SPEC_DIR" -name "*.spec" | head -n 1)
+
+          mkdir -p ~/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+
+          # Copy local files/patches from the package folder into SOURCES
+          cp -r "$SPEC_DIR"/* ~/rpmbuild/SOURCES/
+          cp "$SPEC_FILE" ~/rpmbuild/SPECS/
+
+          # Download any remote Source URLs defined in the spec
+          spectool -g -R ~/rpmbuild/SPECS/"$(basename "$SPEC_FILE")"
+
+          # Install BuildRequires
+          dnf builddep -y ~/rpmbuild/SPECS/"$(basename "$SPEC_FILE")"
+
+      - name: Build Package
+        run: |
+          SPEC_FILE=$(find ~/rpmbuild/SPECS/ -name "*.spec" | head -n 1)
+          rpmbuild -ba "$SPEC_FILE"
+          
+          mkdir -p dist/
+          find ~/rpmbuild/RPMS/ -type f -name "*.rpm" -exec cp {} dist/ \;
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ matrix.package }}
+          path: dist/*.rpm
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: all-rpms/
+          merge-multiple: true
+
+      - name: Publish RPMs to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: all-rpms/*.rpm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
