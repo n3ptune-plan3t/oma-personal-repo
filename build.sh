@@ -2,11 +2,16 @@
 set -eu
 
 # ============================================================
-# Configuration / validation
+# Configuration
 # ============================================================
 
 if [ -z "${PKG:-}" ]; then
     echo "PKG is not set — pass the package name to build" >&2
+    exit 1
+fi
+
+if [ -z "${REPO:-}" ]; then
+    echo "REPO is not set" >&2
     exit 1
 fi
 
@@ -17,30 +22,39 @@ if [ ! -f "$SPEC" ]; then
     exit 1
 fi
 
-echo "==> Building package: $PKG"
-echo "==> Spec: $SPEC"
+ROOT="$PWD"
+ABF="/home/builder/abf/$PKG"
+LOCALREPO="/home/builder/localrepo"
 
-# ============================================================
-# Synchronize OpenMandriva ROME
-# ============================================================
-
+echo "============================================================"
+echo " OpenMandriva package build"
+echo "============================================================"
 echo
+echo "Package : $PKG"
+echo "Spec    : $SPEC"
+echo "Repo    : $REPO"
+echo
+
+# ============================================================
+# Synchronize OpenMandriva Rolling / ROME
+# ============================================================
+
 echo "==> OpenMandriva system"
 cat /etc/os-release
 
 echo
-echo "==> Initial repository configuration"
+echo "==> Initial repositories"
 dnf repolist
 
 echo
-echo "==> Synchronizing OpenMandriva Rolling"
+echo "==> Synchronizing Rolling system"
 
 dnf clean all
 dnf makecache
 dnf distro-sync -y
 
 echo
-echo "==> Repository configuration after synchronization"
+echo "==> Repositories after synchronization"
 dnf repolist
 
 # ============================================================
@@ -63,6 +77,9 @@ dnf install -y \
 # Create builder user
 # ============================================================
 
+echo
+echo "==> Preparing builder user"
+
 if ! id builder >/dev/null 2>&1; then
     useradd -m builder
 fi
@@ -71,56 +88,129 @@ echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
 chmod 440 /etc/sudoers.d/builder
 
 # ============================================================
-# Prepare ABF build directory
+# Verify RPM / architecture environment
+# ============================================================
+
+echo
+echo "============================================================"
+echo " RPM environment"
+echo "============================================================"
+
+echo
+echo "==> RPM target CPU"
+rpm --eval '%{_target_cpu}'
+
+echo
+echo "==> RPM target platform"
+rpm --eval '%{_target_platform}'
+
+echo
+echo "==> RPM distribution"
+rpm --eval '%{distribution}'
+
+echo
+echo "==> RPM database"
+rpm --eval '%{_dbpath}'
+
+if [ ! -d /var/lib/rpm ]; then
+    echo "ERROR: /var/lib/rpm does not exist" >&2
+    exit 1
+fi
+
+echo
+echo "==> RPM packages"
+rpm -q rpm || true
+rpm -q rpm-libs || true
+rpm -q python3-rpm || true
+rpm -q rpmlint || true
+
+echo
+echo "==> Python RPM module"
+
+python3 -c '
+import rpm
+print("python-rpm version:", rpm.__version__)
+print("python-rpm module:", rpm.__file__)
+'
+
+echo
+echo "==> rpmlint"
+rpmlint --version
+
+echo
+echo "==> DNF"
+dnf --version
+
+# ============================================================
+# Verify required commands
+# ============================================================
+
+echo
+echo "==> Required commands"
+
+command -v hostname
+command -v abb
+command -v rpmbuild
+command -v dnf
+command -v rpmlint
+command -v createrepo_c
+command -v gh
+
+# ============================================================
+# Prepare ABF directory
 # ============================================================
 
 echo
 echo "==> Preparing ABF build directory"
 
-su builder -c "mkdir -p /home/builder/abf/$PKG"
+rm -rf "$ABF"
+su builder -c "mkdir -p '$ABF'"
 
-cp "specs/$PKG"/* \
-    "/home/builder/abf/$PKG/"
+cp "specs/$PKG"/* "$ABF/"
 
-chown -R builder:builder /home/builder/abf
+chown -R builder:builder "/home/builder/abf"
 
 # ============================================================
-# Personal RPM repository
+# Download previous personal repository
 # ============================================================
 
 echo
-echo "==> Preparing personal RPM repository"
+echo "============================================================"
+echo " Personal RPM repository"
+echo "============================================================"
 
-mkdir -p /home/builder/localrepo
+rm -rf "$LOCALREPO"
+mkdir -p "$LOCALREPO"
 
 if gh release download repo-rpm \
     --repo "$REPO" \
-    --dir /home/builder/localrepo \
+    --dir "$LOCALREPO" \
     --pattern '*.rpm' \
-    --clobber 2>/dev/null; then
-
-    echo "==> Previous personal RPM repository downloaded"
+    --clobber 2>/dev/null
+then
+    echo "==> Previous repo-rpm release downloaded"
 else
     echo "==> No repo-rpm release yet — building from a clean local repo"
 fi
 
-chown -R builder:builder /home/builder/localrepo
+chown -R builder:builder "$LOCALREPO"
 
-if find /home/builder/localrepo \
+if find "$LOCALREPO" \
     -maxdepth 1 \
     -name '*.rpm' \
     -print -quit 2>/dev/null |
-    grep -q .; then
+    grep -q .
+then
 
-    echo "==> Creating personal RPM repository"
+    echo "==> Creating local repository metadata"
 
     su builder -c \
-        'createrepo_c /home/builder/localrepo'
+        "createrepo_c '$LOCALREPO'"
 
-    cat > /etc/yum.repos.d/local-personal.repo <<'EOF'
+    cat > /etc/yum.repos.d/local-personal.repo <<EOF
 [local-personal]
 name=Personal OpenMandriva repository
-baseurl=file:///home/builder/localrepo
+baseurl=file://$LOCALREPO
 enabled=1
 gpgcheck=0
 priority=1
@@ -133,83 +223,18 @@ else
 fi
 
 # ============================================================
-# Build environment diagnostics
+# Show final repositories
 # ============================================================
 
 echo
 echo "============================================================"
-echo " Build environment"
+echo " Final repositories"
 echo "============================================================"
 
-echo
-echo "==> Architecture"
-rpm --eval '%{_target_cpu}'
-
-echo
-echo "==> RPM platform"
-rpm --eval '%{_target_platform}'
-
-echo
-echo "==> RPM distribution"
-rpm --eval '%{distribution}'
-
-echo
-echo "==> DNF repositories"
 dnf repolist
 
-echo
-echo "==> Required commands"
-
-command -v hostname
-command -v abb
-command -v rpmbuild
-command -v dnf
-
 # ============================================================
-# Verify RPM stack
-# ============================================================
-
-echo
-echo "==> RPM package versions"
-
-rpm -q rpm || true
-rpm -q rpm-libs || true
-rpm -q python3-rpm || true
-rpm -q rpmlint || true
-
-echo
-echo "==> RPM database"
-
-rpm --eval '%{_dbpath}'
-
-if [ -d /var/lib/rpm ]; then
-    echo "/var/lib/rpm exists"
-else
-    echo "ERROR: /var/lib/rpm does not exist" >&2
-    exit 1
-fi
-
-echo
-echo "==> Python RPM module"
-
-python3 -c '
-import rpm
-print("python-rpm:", rpm.__version__)
-print("module:", rpm.__file__)
-'
-
-echo
-echo "==> rpmlint"
-
-rpmlint --version
-
-echo
-echo "==> DNF"
-
-dnf --version
-
-# ============================================================
-# Check required BuildRequires
+# Verify BuildRequires providers
 # ============================================================
 
 echo
@@ -226,6 +251,10 @@ echo "==> pkgconfig(libpulse)"
 dnf provides 'pkgconfig(libpulse)' || true
 
 echo
+echo "==> pkgconfig(openssl)"
+dnf provides 'pkgconfig(openssl)' || true
+
+echo
 echo "==> rust-packaging"
 dnf provides 'rust-packaging' || true
 
@@ -238,9 +267,9 @@ echo "============================================================"
 echo " Linting spec"
 echo "============================================================"
 
-su builder -c \
-    "rpmlint /home/builder/abf/$PKG/$PKG.spec" \
-    || echo "==> rpmlint reported issues on the spec (non-fatal)"
+if ! su builder -c "rpmlint '$ABF/$PKG.spec'"; then
+    echo "==> rpmlint reported issues (non-fatal)"
+fi
 
 # ============================================================
 # Install BuildRequires
@@ -251,18 +280,42 @@ echo "============================================================"
 echo " Installing BuildRequires"
 echo "============================================================"
 
-dnf builddep -y \
-    "/home/builder/abf/$PKG/$PKG.spec"
+dnf builddep -y "$ABF/$PKG.spec"
 
 # ============================================================
-# Verify BuildRequires
+# Verify Cargo / Rust environment
 # ============================================================
 
 echo
-echo "==> Build dependencies installed"
+echo "============================================================"
+echo " Rust environment"
+echo "============================================================"
+
+command -v cargo
+cargo --version
+rustc --version
+
+echo
+echo "==> Cargo target"
+rustc -vV
 
 # ============================================================
-# Build with ABB
+# Verify OpenSSL
+# ============================================================
+
+echo
+echo "============================================================"
+echo " OpenSSL development environment"
+echo "============================================================"
+
+if command -v pkg-config >/dev/null 2>&1; then
+    pkg-config --modversion openssl || true
+    pkg-config --cflags openssl || true
+    pkg-config --libs openssl || true
+fi
+
+# ============================================================
+# Build
 # ============================================================
 
 echo
@@ -270,37 +323,100 @@ echo "============================================================"
 echo " Running abb build"
 echo "============================================================"
 
-su builder -c \
-    "cd /home/builder/abf/$PKG && abb build"
+su builder -c "
+    cd '$ABF'
+    abb build
+"
 
 # ============================================================
-# Collect built RPMs
+# Locate RPMs
 # ============================================================
 
 echo
 echo "============================================================"
-echo " Collecting RPMs"
+echo " Built RPMs"
 echo "============================================================"
 
-mkdir -p "$OLDPWD/out"
-mkdir -p "$OLDPWD/merged"
+RPMDIR="$ABF/RPMS"
 
-find "/home/builder/abf/$PKG/RPMS" \
-    -name '*.rpm' \
-    -exec cp {} "$OLDPWD/out/" \;
+if [ ! -d "$RPMDIR" ]; then
+    echo "ERROR: RPM output directory does not exist: $RPMDIR" >&2
+    exit 1
+fi
 
-# Copy previously released packages
-cp /home/builder/localrepo/*.rpm \
-    "$OLDPWD/merged/" 2>/dev/null || true
+if ! find "$RPMDIR" -name '*.rpm' -print -quit |
+    grep -q .
+then
+    echo "ERROR: No RPMs were produced" >&2
+    exit 1
+fi
 
-# Copy newly built packages
-find "/home/builder/abf/$PKG/RPMS" \
-    -name '*.rpm' \
-    -exec cp {} "$OLDPWD/merged/" \;
+find "$RPMDIR" -name '*.rpm' -print
+
+# ============================================================
+# Verify RPM architecture
+# ============================================================
 
 echo
-echo "==> Packages produced by this build:"
-find "$OLDPWD/out" -name '*.rpm' -print
+echo "============================================================"
+echo " Verifying RPM architecture"
+echo "============================================================"
+
+BAD_ARCH=0
+
+for rpm_file in "$RPMDIR"/*.rpm; do
+    [ -f "$rpm_file" ] || continue
+
+    arch=$(rpm -qp --qf '%{ARCH}' "$rpm_file")
+    nvra=$(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}' "$rpm_file")
+
+    echo "$nvra"
+
+    case "$arch" in
+        znver1)
+            echo "  OK: znver1"
+            ;;
+        noarch)
+            echo "  OK: noarch"
+            ;;
+        *)
+            echo "  ERROR: unexpected architecture: $arch" >&2
+            BAD_ARCH=1
+            ;;
+    esac
+done
+
+if [ "$BAD_ARCH" -ne 0 ]; then
+    echo
+    echo "ERROR: One or more RPMs are not znver1/noarch." >&2
+    exit 1
+fi
+
+# ============================================================
+# Prepare output directories
+# ============================================================
+
+echo
+echo "==> Preparing output directories"
+
+rm -rf "$ROOT/out" "$ROOT/merged"
+
+mkdir -p "$ROOT/out"
+mkdir -p "$ROOT/merged"
+
+# Current build
+find "$RPMDIR" \
+    -name '*.rpm' \
+    -exec cp {} "$ROOT/out/" \;
+
+# Previous personal repository
+cp "$LOCALREPO"/*.rpm \
+    "$ROOT/merged/" 2>/dev/null || true
+
+# Current build
+find "$RPMDIR" \
+    -name '*.rpm' \
+    -exec cp {} "$ROOT/merged/" \;
 
 # ============================================================
 # Lint built RPMs
@@ -311,18 +427,12 @@ echo "============================================================"
 echo " Linting built RPMs"
 echo "============================================================"
 
-if find "$OLDPWD/out" -name '*.rpm' -print -quit |
-    grep -q .; then
-
-    rpmlint "$OLDPWD"/out/*.rpm \
-        || echo "==> rpmlint reported issues on built RPMs (non-fatal)"
-else
-    echo "ERROR: No RPMs were produced" >&2
-    exit 1
+if ! rpmlint "$ROOT"/out/*.rpm; then
+    echo "==> rpmlint reported issues on built RPMs (non-fatal)"
 fi
 
 # ============================================================
-# De-duplicate merged repository
+# De-duplicate repository
 # ============================================================
 
 echo
@@ -331,34 +441,54 @@ echo " De-duplicating merged/"
 echo "============================================================"
 
 (
-    cd "$OLDPWD/merged"
+    cd "$ROOT/merged"
 
-    ls *.rpm 2>/dev/null |
-        sed -E 's/-[^-]+-[^-]+\.[a-zA-Z0-9_]+\.rpm$//' |
-        sort -u |
-        while read -r base; do
+    for rpm_file in *.rpm; do
+        [ -f "$rpm_file" ] || continue
 
-            matches=$(ls -- "$base"-*.rpm 2>/dev/null || true)
+        # Extract package name using RPM itself.
+        pkg_name=$(rpm -qp --qf '%{NAME}' "$rpm_file")
 
-            if [ -z "$matches" ]; then
-                continue
+        # Collect all RPMs belonging to this package.
+        matches=""
+
+        for candidate in *.rpm; do
+            [ -f "$candidate" ] || continue
+
+            candidate_name=$(rpm -qp --qf '%{NAME}' "$candidate")
+
+            if [ "$candidate_name" = "$pkg_name" ]; then
+                matches="$matches
+$candidate"
             fi
-
-            newest=$(printf '%s\n' "$matches" |
-                sort -V |
-                tail -n1)
-
-            printf '%s\n' "$matches" |
-                while read -r f; do
-
-                    [ "$f" = "$newest" ] && continue
-
-                    echo "==> Removing stale $f"
-                    echo "    superseded by $newest"
-
-                    rm -f -- "$f"
-                done
         done
+
+        # Find newest version-release.
+        newest=$(
+            printf '%s\n' "$matches" |
+            sed '/^$/d' |
+            while read -r f; do
+                rpm -qp --qf '%{EPOCHNUM}:%{VERSION}-%{RELEASE} %{NAME} %{ARCH} %{FILENAMES}\n' "$f"
+            done |
+            sort -V |
+            tail -n1 |
+            sed 's/.* \([^ ]*\.rpm\)$/\1/'
+        )
+
+        if [ -z "$newest" ]; then
+            continue
+        fi
+
+        printf '%s\n' "$matches" |
+        sed '/^$/d' |
+        while read -r f; do
+            if [ "$f" != "$newest" ]; then
+                echo "==> Removing stale $f"
+                echo "    superseded by $newest"
+                rm -f -- "$f"
+            fi
+        done
+    done
 )
 
 # ============================================================
@@ -370,11 +500,24 @@ echo "============================================================"
 echo " Creating repository metadata"
 echo "============================================================"
 
-createrepo_c "$OLDPWD/merged"
+createrepo_c "$ROOT/merged"
 
 # ============================================================
-# Final summary
+# Final verification
 # ============================================================
+
+echo
+echo "============================================================"
+echo " Final package list"
+echo "============================================================"
+
+for rpm_file in "$ROOT"/out/*.rpm; do
+    [ -f "$rpm_file" ] || continue
+
+    rpm -qp \
+        --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}.rpm\n' \
+        "$rpm_file"
+done
 
 echo
 echo "============================================================"
@@ -382,19 +525,19 @@ echo " Build complete"
 echo "============================================================"
 
 echo
-echo "==> This run's packages:"
-find "$OLDPWD/out" -name '*.rpm' -print
+echo "Current build:"
+find "$ROOT/out" -name '*.rpm' -print
 
 echo
-echo "==> Complete personal repository:"
-find "$OLDPWD/merged" -maxdepth 1 -name '*.rpm' -print
+echo "Personal repository:"
+find "$ROOT/merged" -maxdepth 1 -name '*.rpm' -print
 
 echo
-echo "==> Target architecture:"
+echo "Target RPM architecture:"
 rpm --eval '%{_target_cpu}'
 
 echo
-echo "==> Repository:"
+echo "Repository:"
 dnf repolist
 
 echo
