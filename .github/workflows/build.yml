@@ -13,8 +13,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     container:
-      image: openmandriva/cooker:x86_64
+      image: openmandriva/minimal:rolling
       options: --platform linux/amd64 --privileged
 
     steps:
@@ -40,11 +41,13 @@ jobs:
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
 
-      - name: Delete previous release for this package (if any)
+      - name: Delete previous release for this package
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete "${{ inputs.package }}" --yes --cleanup-tag \
+          gh release delete "${{ inputs.package }}" \
+            --yes \
+            --cleanup-tag \
             --repo "${{ github.repository }}" || true
 
       - name: Publish per-package release
@@ -62,9 +65,14 @@ jobs:
           for f in merged/*.rpm; do
             base=$(basename "$f")
             pkg=$(echo "$base" | sed -E 's/-[^-]+-[^-]+\.[a-zA-Z0-9_]+\.rpm$//')
-            gh release view repo-rpm --json assets --jq '.assets[].name' 2>/dev/null \
+
+            gh release view repo-rpm \
+              --json assets \
+              --jq '.assets[].name' \
+              2>/dev/null \
               | grep "^${pkg}-" \
-              | xargs -r -I{} gh release delete-asset repo-rpm {} --yes || true
+              | xargs -r -I{} gh release delete-asset \
+                  repo-rpm "{}" --yes || true
           done
 
       - name: Publish rolling repo release
@@ -73,12 +81,12 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           tag_name: repo-rpm
-          name: "Personal repo snapshot (rpm)"
+          name: "Personal repo snapshot (RPM)"
           files: |
             merged/*.rpm
             merged/repodata/*
 
-      - name: Upload built package (workflow artifact)
+      - name: Upload built package
         uses: actions/upload-artifact@v4
         with:
           name: rpm-${{ inputs.package }}
