@@ -10,9 +10,10 @@ URL:            https://github.com/greshake/i3status-rust
 Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 
 BuildRequires:  cargo
+BuildRequires:  rust-packaging
 BuildRequires:  pkgconfig(libpulse)
 BuildRequires:  pkgconfig(dbus-1)
-BuildRequires:  rust-packaging
+BuildRequires:  pkgconfig(openssl)
 
 %description
 i3status-rs is a feature-rich and resource-friendly replacement for i3status,
@@ -28,7 +29,10 @@ cargo build --release
 
 %install
 mkdir -p %{buildroot}%{_bindir}
-install -m 0755 target/release/i3status-rs %{buildroot}%{_bindir}/i3status-rs
+
+install -m 0755 
+target/release/i3status-rs 
+%{buildroot}%{_bindir}/i3status-rs
 
 install -m 0655 -Dp 
 example_config.toml 
