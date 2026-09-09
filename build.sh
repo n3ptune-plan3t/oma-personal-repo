@@ -72,7 +72,6 @@ dnf install -y \
     createrepo_c \
     github-cli \
     hostname
-    gcc g++ make cmake rust cargo systemd
 
 # ============================================================
 # Create builder user
