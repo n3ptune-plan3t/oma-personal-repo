@@ -14,7 +14,7 @@ BuildRequires:  rust-packaging
 BuildRequires:  pkgconfig(libpulse)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(openssl)
-BuildRequires:  pkgconfig(libsensors)
+BuildRequires:  pkgconfig(lm_sensors)
 
 %description
 i3status-rs is a feature-rich and resource-friendly replacement for i3status,
@@ -26,17 +26,17 @@ compatible with sway.
 %autosetup -p1
 
 %build
-cargo build --release
+%cargo build --release
 
 %install
 mkdir -p %{buildroot}%{_bindir}
 
-install -m 0755 
-target/release/i3status-rs 
+install -m 0755 \
+target/release/i3status-rs \
 %{buildroot}%{_bindir}/i3status-rs
 
-install -m 0655 -Dp 
-example_config.toml 
+install -m 0644 -Dp \
+example_config.toml \
 %{buildroot}%{_sysconfdir}/xdg/i3/status.toml
 
 %files
