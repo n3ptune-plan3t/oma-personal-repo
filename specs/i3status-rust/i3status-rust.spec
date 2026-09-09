@@ -26,7 +26,7 @@ compatible with sway.
 %autosetup -p1
 
 %build
-%cargo build --release
+cargo build --release
 
 %install
 mkdir -p %{buildroot}%{_bindir}
