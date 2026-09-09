@@ -14,6 +14,7 @@ BuildRequires:  rust-packaging
 BuildRequires:  pkgconfig(libpulse)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(openssl)
+BuildRequires:  pkgconfig(libsensors)
 
 %description
 i3status-rs is a feature-rich and resource-friendly replacement for i3status,
