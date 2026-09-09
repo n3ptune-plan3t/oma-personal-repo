@@ -1,118 +1,86 @@
-name: Build OpenMandriva Packages
+name: Build OpenMandriva package
 
 on:
-  push:
-    tags:
-      - 'v*'
-    paths:
-      - 'packages/**'
-  pull_request:
-    paths:
-      - 'packages/**'
   workflow_dispatch:
+    inputs:
+      package:
+        description: 'Package name to build (must match specs/<name>/<name>.spec)'
+        required: true
+
+permissions:
+  contents: write
 
 jobs:
-  discover:
-    runs-on: ubuntu-latest
-    outputs:
-      packages: ${{ steps.find-pkgs.outputs.packages }}
-      has_packages: ${{ steps.find-pkgs.outputs.has_packages }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: find-pkgs
-        run: |
-          mkdir -p packages
-          PKGS=$(find packages -mindepth 2 -maxdepth 2 -name "*.spec" -exec dirname {} \; | xargs -r -n 1 basename | sort -u | jq -R -s -c 'split("\n")[:-1]')
-          echo "Discovered packages: ${PKGS}"
-
-          if [ -z "$PKGS" ] || [ "$PKGS" = "[]" ]; then
-            echo "has_packages=false" >> "$GITHUB_OUTPUT"
-            echo 'packages=["none"]' >> "$GITHUB_OUTPUT"
-          else
-            echo "has_packages=true" >> "$GITHUB_OUTPUT"
-            echo "packages=${PKGS}" >> "$GITHUB_OUTPUT"
-          fi
-
   build:
-    needs: discover
-    if: needs.discover.outputs.has_packages == 'true'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        package: ${{ fromJson(needs.discover.outputs.packages) }}
+    container:
+      image: openmandriva/cooker:x86_64
+      options: --platform linux/amd64 --privileged
+
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build RPM inside OpenMandriva Container
+      - name: Compute cache week
+        id: cachekey
+        run: echo "week=$(date +%Y-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache dnf package downloads
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/dnf
+          key: dnf-pkgcache-${{ steps.cachekey.outputs.week }}
+          restore-keys: |
+            dnf-pkgcache-
+
+      - name: Build package
+        run: sh build.sh
+        env:
+          PKG: ${{ inputs.package }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Delete previous release for this package (if any)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p dist
-          chmod 777 dist
+          gh release delete "${{ inputs.package }}" --yes --cleanup-tag \
+            --repo "${{ github.repository }}" || true
 
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspace" \
-            -w /workspace \
-            docker.io/openmandriva/cooker /bin/bash -c "
-              set -e
+      - name: Publish per-package release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tag_name: ${{ inputs.package }}
+          files: out/*.rpm
 
-              # 1. Update and install required packaging tools
-              dnf --refresh -y install \
-                rpm-build \
-                rpm-openmandriva-setup \
-                rpmdevtools \
-                dnf-plugins-core \
-                git \
-                curl \
-                tar \
-                findutils \
-                coreutils
+      - name: Remove stale versions from the rolling repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for f in merged/*.rpm; do
+            base=$(basename "$f")
+            pkg=$(echo "$base" | sed -E 's/-[^-]+-[^-]+\.[a-zA-Z0-9_]+\.rpm$//')
+            gh release view repo-rpm --json assets --jq '.assets[].name' 2>/dev/null \
+              | grep "^${pkg}-" \
+              | xargs -r -I{} gh release delete-asset repo-rpm {} --yes || true
+          done
 
-              # 2. Setup build environment
-              SPEC_DIR=\"packages/${{ matrix.package }}\"
-              SPEC_FILE=\$(find \"\$SPEC_DIR\" -maxdepth 1 -name \"*.spec\" | head -n 1)
-              SPEC_BASENAME=\$(basename \"\$SPEC_FILE\")
+      - name: Publish rolling repo release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tag_name: repo-rpm
+          name: "Personal repo snapshot (rpm)"
+          files: |
+            merged/*.rpm
+            merged/repodata/*
 
-              mkdir -p /root/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
-
-              # Copy local source files and spec into rpmbuild paths
-              cp -r \"\$SPEC_DIR\"/* /root/rpmbuild/SOURCES/
-              cp \"\$SPEC_FILE\" /root/rpmbuild/SPECS/
-
-              # 3. Fetch remote sources and install build dependencies
-              spectool -g -R /root/rpmbuild/SPECS/\"\$SPEC_BASENAME\"
-              dnf builddep -y /root/rpmbuild/SPECS/\"\$SPEC_BASENAME\"
-
-              # 4. Build binary and source packages
-              rpmbuild -ba /root/rpmbuild/SPECS/\"\$SPEC_BASENAME\"
-
-              # 5. Export built packages to workspace artifact directory
-              find /root/rpmbuild/RPMS/ -type f -name \"*.rpm\" -exec cp {} /workspace/dist/ \;
-            "
-
-      - name: Upload Package Artifacts
+      - name: Upload built package (workflow artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: rpm-${{ matrix.package }}
-          path: dist/*.rpm
-
-  release:
-    needs: [discover, build]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') && needs.discover.outputs.has_packages == 'true'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: all-rpms/
-          merge-multiple: true
-
-      - name: Publish RPMs to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: all-rpms/*.rpm
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: rpm-${{ inputs.package }}
+          path: out/
+          if-no-files-found: error
