@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: openmandriva/minimal:rolling
-      options: --platform linux/amd64 --privileged
+        image: openmandriva/minimal:rolling
+        options: --platform linux/amd64 --privileged
 
     steps:
       - name: Checkout
