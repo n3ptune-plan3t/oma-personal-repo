@@ -4,16 +4,19 @@ Version:	2.16
 Release:	1
 License:	GPLv2+
 Group:		System/Kernel and hardware
-Url:		https://01.org/powertop/
-Source0:	https://github.com/fenrus75/powertop/archive/refs/tags/v%{version}.tar.gz
-BuildRequires:	autoconf
-BuildRequires:	automake
-BuildRequires:	libtool-base
-BuildRequires:	slibtool
-BuildRequires:	make
+Url:		https://github.com/fenrus75/powertop
+Source0:	https://github.com/fenrus75/powertop/archive/refs/tags/v%{version}/%{name}-%{version}.tar.gz
+
+# Upstream switched to the meson build system as of 2.16
+# (autotools files are still shipped but are stale/unmaintained).
+BuildSystem:	meson
+BuildOption:	-Dbindir=%{_sbindir}
+
+BuildRequires:	meson
 BuildRequires:	pkgconfig(ncursesw)
 BuildRequires:	pkgconfig(libpci)
 BuildRequires:	pkgconfig(libnl-3.0)
+BuildRequires:	pkgconfig(libtracefs)
 BuildRequires:	pkgconfig(zlib)
 BuildRequires:	gettext-devel
 
@@ -26,22 +29,10 @@ the biggest offenders in slurping up battery time. PowerTOP will
 update it's display frequently so that the impact of any changes can
 be seen directly.
 
-%prep
-%autosetup -p1
-find . -name "*.o" -exec rm {} \;
-
-%build
-./autogen.sh
-%configure
-%make_build
-
-%install
-%make_install
-
 %find_lang %{name}
 
 %files -f %{name}.lang
-%doc README TODO
+%doc README.md TODO
 %{_sbindir}/%{name}
 %{_mandir}/*/*.*
 %{_datadir}/bash-completion/completions/%{name}
