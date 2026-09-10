@@ -3,16 +3,39 @@ name: Build OpenMandriva package
 on:
   workflow_dispatch:
     inputs:
-      package:
-        description: 'Package name to build (must match specs/<name>/<name>.spec)'
+      packages:
+        description: 'Package name(s) to build, space- or comma-separated (each must match specs/<name>/<name>.spec)'
         required: true
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  plan:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - name: Build package matrix from input
+        id: set
+        run: |
+          matrix=$(printf '%s' "${{ inputs.packages }}" |
+            tr ',' ' ' |
+            xargs -n1 |
+            jq -R . |
+            jq -sc '{package: .}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+      # Builds share and publish to the same repo-rpm release below;
+      # running them one at a time avoids two jobs racing to
+      # upload/delete assets on that shared release.
+      max-parallel: 1
+      fail-fast: false
 
     container:
         image: openmandriva/minimal:rolling
@@ -37,7 +60,7 @@ jobs:
       - name: Build package
         run: sh build.sh
         env:
-          PKG: ${{ inputs.package }}
+          PKG: ${{ matrix.package }}
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
 
@@ -45,7 +68,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete "${{ inputs.package }}" \
+          gh release delete "${{ matrix.package }}" \
             --yes \
             --cleanup-tag \
             --repo "${{ github.repository }}" || true
@@ -55,7 +78,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          tag_name: ${{ inputs.package }}
+          tag_name: ${{ matrix.package }}
           files: out/*.rpm
 
       - name: Remove stale versions from the rolling repo
@@ -89,6 +112,6 @@ jobs:
       - name: Upload built package
         uses: actions/upload-artifact@v4
         with:
-          name: rpm-${{ inputs.package }}
+          name: rpm-${{ matrix.package }}
           path: out/
           if-no-files-found: error
