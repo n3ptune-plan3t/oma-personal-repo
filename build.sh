@@ -25,6 +25,7 @@ fi
 ROOT="$PWD"
 ABF="/home/builder/abf/$PKG"
 LOCALREPO="/home/builder/localrepo"
+TARGET_ARCH="${TARGET_ARCH:-znver1}"
 
 echo "============================================================"
 echo " OpenMandriva package build"
@@ -33,6 +34,7 @@ echo
 echo "Package : $PKG"
 echo "Spec    : $SPEC"
 echo "Repo    : $REPO"
+echo "Arch    : $TARGET_ARCH"
 echo
 
 # ============================================================
@@ -242,21 +244,21 @@ echo "============================================================"
 echo " Build dependency providers"
 echo "============================================================"
 
-echo
-echo "==> pkgconfig(dbus-1)"
-dnf provides 'pkgconfig(dbus-1)' || true
-
-echo
-echo "==> pkgconfig(libpulse)"
-dnf provides 'pkgconfig(libpulse)' || true
-
-echo
-echo "==> pkgconfig(openssl)"
-dnf provides 'pkgconfig(openssl)' || true
-
-echo
-echo "==> rust-packaging"
-dnf provides 'rust-packaging' || true
+# Every BuildRequires the spec actually declares, with version
+# comparisons stripped, so this stays correct as specs change
+# instead of drifting out of sync with a fixed list.
+grep -E '^BuildRequires:' "$ABF/$PKG.spec" |
+    sed -E 's/^BuildRequires:[[:space:]]*//' |
+    sed -E 's/[[:space:]]*(>=|<=|==|=|>|<)[[:space:]]*[^[:space:]]+//g' |
+    tr ',' '\n' |
+    sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' |
+    sed '/^$/d' |
+    sort -u |
+    while read -r req; do
+        echo
+        echo "==> $req"
+        dnf provides "$req" || true
+    done
 
 # ============================================================
 # Lint spec
@@ -283,35 +285,44 @@ echo "============================================================"
 dnf builddep -y "$ABF/$PKG.spec"
 
 # ============================================================
-# Verify Cargo / Rust environment
+# Verify Cargo / Rust environment (only for Rust packages)
+# ============================================================
+
+if grep -Eq '^BuildRequires:\s*(cargo|rust-packaging)\b' "$ABF/$PKG.spec"; then
+    echo
+    echo "============================================================"
+    echo " Rust environment"
+    echo "============================================================"
+
+    command -v cargo
+    cargo --version
+    rustc --version
+
+    echo
+    echo "==> Cargo target"
+    rustc -vV
+fi
+
+# ============================================================
+# Verify pkg-config modules
 # ============================================================
 
 echo
 echo "============================================================"
-echo " Rust environment"
-echo "============================================================"
-
-command -v cargo
-cargo --version
-rustc --version
-
-echo
-echo "==> Cargo target"
-rustc -vV
-
-# ============================================================
-# Verify OpenSSL
-# ============================================================
-
-echo
-echo "============================================================"
-echo " OpenSSL development environment"
+echo " pkg-config module environment"
 echo "============================================================"
 
 if command -v pkg-config >/dev/null 2>&1; then
-    pkg-config --modversion openssl || true
-    pkg-config --cflags openssl || true
-    pkg-config --libs openssl || true
+    grep -oE 'pkgconfig\([^)]+\)' "$ABF/$PKG.spec" |
+        sed -E 's/pkgconfig\(([^)]+)\)/\1/' |
+        sort -u |
+        while read -r mod; do
+            echo
+            echo "==> $mod"
+            pkg-config --modversion "$mod" || true
+            pkg-config --cflags "$mod" || true
+            pkg-config --libs "$mod" || true
+        done
 fi
 
 # ============================================================
@@ -373,14 +384,14 @@ for rpm_file in "$RPMDIR"/*.rpm; do
     echo "$nvra"
 
     case "$arch" in
-        znver1)
-            echo "  OK: znver1"
+        "$TARGET_ARCH")
+            echo "  OK: $TARGET_ARCH"
             ;;
         noarch)
             echo "  OK: noarch"
             ;;
         *)
-            echo "  ERROR: unexpected architecture: $arch" >&2
+            echo "  ERROR: unexpected architecture: $arch (expected $TARGET_ARCH or noarch)" >&2
             BAD_ARCH=1
             ;;
     esac
@@ -388,7 +399,7 @@ done
 
 if [ "$BAD_ARCH" -ne 0 ]; then
     echo
-    echo "ERROR: One or more RPMs are not znver1/noarch." >&2
+    echo "ERROR: One or more RPMs are not $TARGET_ARCH/noarch." >&2
     exit 1
 fi
 
