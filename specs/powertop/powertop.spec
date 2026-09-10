@@ -5,7 +5,7 @@ Release:	1
 License:	GPLv2+
 Group:		System/Kernel and hardware
 Url:		https://01.org/powertop/
-Source0:	http://01.org/powertop/sites/default/files/downloads/%{name}-%{version}.tar.gz
+Source0:	https://github.com/fenrus75/powertop/archive/refs/tags/v%{version}.tar.gz
 BuildRequires:	autoconf
 BuildRequires:	automake
 BuildRequires:	libtool-base
