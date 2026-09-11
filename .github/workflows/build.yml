@@ -7,6 +7,19 @@ on:
         description: 'Package name(s) to build, space- or comma-separated (each must match specs/<name>/<name>.spec)'
         required: true
 
+# Every run — regardless of how many packages it builds — reads,
+# merges into, and republishes the single shared repo-rpm release.
+# Without a shared concurrency group, two separate dispatches (e.g.
+# building libtracefs, then powertop, without waiting for the first
+# to finish) can run in parallel containers and race on that
+# read-modify-write, so a later build can silently miss a package
+# an earlier, still-in-flight build hasn't published yet.
+# cancel-in-progress is false so runs queue rather than one killing
+# the other mid-publish.
+concurrency:
+  group: oma-personal-repo-build
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
