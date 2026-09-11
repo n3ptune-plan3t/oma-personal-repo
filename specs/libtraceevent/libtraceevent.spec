@@ -1,3 +1,7 @@
+%define major   1
+%define libname %mklibname traceevent %{major}
+%define devname %mklibname traceevent -d
+
 Summary:	Linux kernel trace event parsing library
 Name:		libtraceevent
 Version:	1.8.4
@@ -7,12 +11,7 @@ Group:		System/Libraries
 Url:		https://git.kernel.org/pub/scm/libs/libtrace/libtraceevent.git/
 Source0:	https://git.kernel.org/pub/scm/libs/libtrace/libtraceevent.git/snapshot/%{name}-%{version}.tar.gz
 
-# Not built from a GitHub source: the GitHub mirror (rostedt/libtraceevent)
-# carries no release tags, only a rolling branch. kernel.org is the real
-# upstream and what Fedora/SUSE build from.
 BuildSystem:	meson
-# Personal-repo package: skip building the optional asciidoc/xmlto docs
-# to avoid pulling in a doc toolchain nobody here will read.
 BuildOption:	-Ddefault_library=shared
 BuildOption:	-Ddoc=false
 
@@ -24,12 +23,33 @@ ftrace and perf. It was originally embedded in trace-cmd and later
 split out into its own library; libtracefs and powertop's tracing
 support link against it.
 
-%post -p /sbin/ldconfig
-%postun -p /sbin/ldconfig
+%package -n %{libname}
+Summary:	Linux kernel trace event parsing library
+Group:		System/Libraries
 
-%files
-%{_libdir}/%{name}.so*
-%{_libdir}/pkgconfig/%{name}.pc
-%{_includedir}/traceevent/
+%description -n %{libname}
+libtraceevent parses the raw Linux kernel trace event formats used by
+ftrace and perf.
+
+%package -n %{devname}
+Summary:	Development files for libtraceevent
+Group:		Development/C
+Requires:	%{libname} = %{version}-%{release}
+Provides:	libtraceevent-devel = %{version}-%{release}
+
+%description -n %{devname}
+Headers, pkgconfig file, and unversioned .so symlink needed to build
+software against libtraceevent.
+
+%post -n %{libname} -p /sbin/ldconfig
+%postun -n %{libname} -p /sbin/ldconfig
+
+%files -n %{libname}
+%{_libdir}/%{name}.so.%{major}*
 %dir %{_libdir}/traceevent
 %{_libdir}/traceevent/plugins/
+
+%files -n %{devname}
+%{_libdir}/%{name}.so
+%{_libdir}/pkgconfig/%{name}.pc
+%{_includedir}/traceevent/
