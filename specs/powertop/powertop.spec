@@ -10,7 +10,6 @@ Source0:	https://github.com/fenrus75/powertop/archive/refs/tags/v%{version}/%{na
 # Upstream switched to the meson build system as of 2.16
 # (autotools files are still shipped but are stale/unmaintained).
 BuildSystem:	meson
-BuildOption:	-Dbindir=%{_sbindir}
 
 BuildRequires:	meson
 BuildRequires:	pkgconfig(ncursesw)
