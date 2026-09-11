@@ -460,39 +460,31 @@ echo "============================================================"
         # Extract package name using RPM itself.
         pkg_name=$(rpm -qp --qf '%{NAME}' "$rpm_file")
 
-        # Collect all RPMs belonging to this package.
-        matches=""
+        # Collect "version-release<TAB>filename" pairs for this package.
+        matches=$(
+            for candidate in *.rpm; do
+                [ -f "$candidate" ] || continue
 
-        for candidate in *.rpm; do
-            [ -f "$candidate" ] || continue
+                candidate_name=$(rpm -qp --qf '%{NAME}' "$candidate")
 
-            candidate_name=$(rpm -qp --qf '%{NAME}' "$candidate")
-
-            if [ "$candidate_name" = "$pkg_name" ]; then
-                matches="$matches
-$candidate"
-            fi
-        done
-
-        # Find newest version-release.
-        newest=$(
-            printf '%s\n' "$matches" |
-            sed '/^$/d' |
-            while read -r f; do
-                rpm -qp --qf '%{EPOCHNUM}:%{VERSION}-%{RELEASE} %{NAME} %{ARCH} %{FILENAMES}\n' "$f"
-            done |
-            sort -V |
-            tail -n1 |
-            sed 's/.* \([^ ]*\.rpm\)$/\1/'
+                if [ "$candidate_name" = "$pkg_name" ]; then
+                    vr=$(rpm -qp --qf '%{EPOCHNUM}:%{VERSION}-%{RELEASE}' "$candidate")
+                    printf '%s\t%s\n' "$vr" "$candidate"
+                fi
+            done
         )
 
-        if [ -z "$newest" ]; then
+        if [ -z "$matches" ]; then
             continue
         fi
 
+        # Sort by version-release (field 1) and take the newest filename.
+        newest=$(printf '%s\n' "$matches" | sort -t "$(printf '\t')" -k1,1V | tail -n1 | cut -f2)
+
         printf '%s\n' "$matches" |
-        sed '/^$/d' |
+        cut -f2 |
         while read -r f; do
+            [ -n "$f" ] || continue
             if [ "$f" != "$newest" ]; then
                 echo "==> Removing stale $f"
                 echo "    superseded by $newest"
