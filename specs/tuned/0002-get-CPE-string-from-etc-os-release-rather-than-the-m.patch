@@ -1,0 +1,30 @@
+diff -up tuned-2.27.0/tuned/consts.py.1\~ tuned-2.27.0/tuned/consts.py
+--- tuned-2.27.0/tuned/consts.py.1\~	2026-09-11 13:33:16.896535536 +0000
++++ tuned-2.27.0/tuned/consts.py	2026-09-11 13:33:16.900535537 +0000
+@@ -86,7 +86,7 @@ LOG_FILE_MAXBYTES = 100*1000
+ LOG_FILE = "/var/log/tuned/tuned.log"
+ PPD_LOG_FILE = "/var/log/tuned/tuned-ppd.log"
+ PID_FILE = "/run/tuned/tuned.pid"
+-SYSTEM_RELEASE_FILE = "/etc/system-release-cpe"
++OS_RELEASE_FILE = "/etc/os-release"
+ # prefix for functions plugins
+ FUNCTION_PREFIX = "function_"
+ # prefix for exported environment variables when calling scripts
+diff -up tuned-2.27.0/tuned/utils/profile_recommender.py.1\~ tuned-2.27.0/tuned/utils/profile_recommender.py
+--- tuned-2.27.0/tuned/utils/profile_recommender.py.1\~	2026-09-11 13:33:16.896535536 +0000
++++ tuned-2.27.0/tuned/utils/profile_recommender.py	2026-09-11 13:33:16.940535538 +0000
+@@ -78,10 +78,9 @@ class ProfileRecommender:
+ 								self._commands.execute(["virt-what"])[1], re.S):
+ 							match = False
+ 					elif option == "system":
+-						if not re.match(value,
+-								self._commands.read_file(
+-								consts.SYSTEM_RELEASE_FILE,
+-								no_error = True), re.S):
++						regex = re.search('CPE_NAME="(.*)"', self._commands.read_file(consts.OS_RELEASE_FILE, no_error=True))
++						cpe = ("" if regex is None else regex.groups()[0])
++						if not re.match(value, cpe, re.S):
+ 							match = False
+ 					elif option[0] == "/":
+ 						if not os.path.exists(option) or not re.match(value,
+ 								self._commands.read_file(option), re.S):
