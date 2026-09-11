@@ -200,17 +200,20 @@ sed -i -e 's#/usr/sbin#%{_sbindir}#g' Makefile tuned-gui.desktop tuned-gui.py tu
 
 %install
 %make_install \
+  BINDIR="%{_bindir}" \
+  SBINDIR="%{_sbindir}" \
   TUNED_SYSTEM_PROFILES_DIR="%{system_profiles_dir}" \
   TUNED_USER_PROFILES_DIR="%{user_profiles_dir}"
 
-# Install PPD bits if present
+# PPD support
 make install-ppd DESTDIR="%{buildroot}" \
-  BINDIR="%{_bindir}" SBINDIR="%{_sbindir}" \
+  BINDIR="%{_bindir}" \
+  SBINDIR="%{_sbindir}" \
   DOCDIR="%{_docdir}/%{name}" || :
 
 rm -rf %{buildroot}%{_docdir}/%{name}
 
-# OpenMandriva default
+# OpenMandriva default profile
 printf '%s\n' 'latency-performance' > %{buildroot}%{_sysconfdir}/tuned/active_profile
 
 install -d %{buildroot}%{_presetdir}
@@ -218,13 +221,12 @@ cat > %{buildroot}%{_presetdir}/86-tuned.preset << EOF
 enable tuned.service
 EOF
 
-# Ensure directories exist
+# Ensure required directories exist
 install -d %{buildroot}%{user_profiles_dir}
 install -d %{buildroot}%{_sysconfdir}/tuned/recommend.d
 install -d %{buildroot}%{_localstatedir}/log/tuned
 install -d %{buildroot}/run/tuned
 install -d %{buildroot}%{_var}/lib/tuned
-
 %post
 %systemd_post tuned.service
 
