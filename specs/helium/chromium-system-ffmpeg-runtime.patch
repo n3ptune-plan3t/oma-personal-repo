@@ -1,0 +1,35 @@
+--- chromium/media/ffmpeg/ffmpeg_common.cc.omv~	2026-08-13 00:00:00.000000000 +0000
++++ chromium/media/ffmpeg/ffmpeg_common.cc	2026-08-13 00:00:00.000000000 +0000
+@@ -515,9 +515,10 @@ void AudioDecoderConfigToAVCodecContext(
+   codec_context->sample_fmt = SampleFormatToAVSampleFormat(
+       config.sample_format());
+ 
+-  // TODO(scherkus): should we set |channel_layout|? I'm not sure if FFmpeg uses
+-  // said information to decode.
+-  codec_context->ch_layout.nb_channels = config.channels();
++  // FFmpeg 5+ AVChannelLayout: setting only nb_channels leaves order=UNSPEC.
++  // av_channel_layout_default() fills a native layout (stereo, 5.1, ...).
++  // Decoders may accept UNSPEC, but FFmpeg 9 is stricter about a valid layout.
++  av_channel_layout_default(&codec_context->ch_layout, config.channels());
+   codec_context->sample_rate = config.samples_per_second();
+ 
+   CopyBufferFromConfig(config, codec_context);
+@@ -1118,10 +1119,15 @@ const char* GetAllowedAudioDecoders() {
+ #define EXTRA_CODECS
+ #endif
+ 
+-  // This should match the configured lists in //third_party/ffmpeg.
++  // Bundled Chromium FFmpeg registers "libopus" (wrapper) and "mp3".
++  // System FFmpeg 9 prefers the native names "opus" and "mp3float"
++  // (avcodec_find_decoder(AV_CODEC_ID_OPUS) == "opus"). The codec_whitelist
++  // is matched against that name, so YouTube (WebM/Opus) fails unless both
++  // aliases are allowed. Extra names that are absent from a given build are
++  // ignored by av_match_list.
+   static constexpr std::string_view kAllowedAudioCodecs =
+-      "vorbis,libopus,flac,pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,"
+-      "mp3,pcm_s16be,pcm_s24be,pcm_mulaw,pcm_alaw" EXTRA_CODECS;
++      "vorbis,libopus,opus,flac,pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,"
++      "mp3,mp3float,pcm_s16be,pcm_s24be,pcm_mulaw,pcm_alaw" EXTRA_CODECS;
+ #undef EXTRA_CODECS
+ 
+   return kAllowedAudioCodecs.data();

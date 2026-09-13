@@ -1,0 +1,46 @@
+diff -up chromium-141.0.7390.54/build/config/clang/BUILD.gn.48~ chromium-141.0.7390.54/build/config/clang/BUILD.gn
+--- chromium-141.0.7390.54/build/config/clang/BUILD.gn.48~	2025-09-29 19:05:47.000000000 +0200
++++ chromium-141.0.7390.54/build/config/clang/BUILD.gn	2025-10-04 04:18:12.263920237 +0200
+@@ -152,6 +152,7 @@ template("clang_lib") {
+       _prefix = "lib"
+       _suffix = ""
+       _ext = "a"
++      _libsuffix = ""
+ 
+       if (is_win) {
+         _dir = "windows"
+@@ -168,7 +169,24 @@ template("clang_lib") {
+         }
+       } else if (is_apple) {
+         _dir = "darwin"
+-      } else if (is_linux || is_chromeos) {
++      } else if (is_linux) {
++        if (current_cpu == "x64") {
++          _dir = "x86_64-pc-linux-gnu"
++          _libsuffix = "64"
++        } else if (current_cpu == "x86") {
++          _dir = "i386-pc-linux-gnu"
++        } else if (current_cpu == "arm") {
++          _dir = "armv7-unknown-linux-gnueabihf"
++        } else if (current_cpu == "arm64") {
++          _dir = "aarch64-unknown-linux-gnu"
++          _libsuffix = "64"
++        } else if (current_cpu == "ppc64") {
++          _dir = "powerpc64le-pc-linux-gnu"
++          _libsuffix = "64"
++        } else {
++          assert(false)  # Unhandled cpu type
++        }
++      } else if (is_chromeos) {
+         if (current_cpu == "x64") {
+           _dir = "x86_64-unknown-linux-gnu"
+         } else if (current_cpu == "x86") {
+@@ -215,7 +233,7 @@ template("clang_lib") {
+         assert(false)  # Unhandled target platform
+       }
+ 
+-      _clang_lib_dir = "$clang_base_path/lib/clang/$clang_version/lib"
++      _clang_lib_dir = "$clang_base_path/lib${_libsuffix}/clang/$clang_version/lib"
+       _lib_file = "${_prefix}clang_rt.${_libname}${_suffix}.${_ext}"
+       libs = [ "$_clang_lib_dir/$_dir/$_lib_file" ]
+     }

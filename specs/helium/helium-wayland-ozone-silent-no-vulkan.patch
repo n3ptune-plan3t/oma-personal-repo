@@ -1,0 +1,40 @@
+# Ozone/Wayland cannot use native Vulkan. Do not print an ERROR or ask
+# the user to switch to X11; just decline Vulkan so GpuInit falls back
+# to GL. X11 Ozone still creates a Vulkan implementation as before.
+# SwiftShader Vulkan on Wayland is unchanged (tests / software path).
+
+diff -urN a/gpu/ipc/service/gpu_init.cc b/gpu/ipc/service/gpu_init.cc
+--- a/gpu/ipc/service/gpu_init.cc	2026-08-29 18:45:02.897904278 +0200
++++ b/gpu/ipc/service/gpu_init.cc	2026-08-29 18:45:02.897721296 +0200
+@@ -1428,8 +1428,11 @@
+ 
+   vulkan_implementation_ = CreateVulkanImplementation(
+       vulkan_use_swiftshader, gpu_preferences_.enable_vulkan_protected_memory);
+-  if (!vulkan_implementation_ ||
+-      !vulkan_implementation_->InitializeVulkanInstance(
++  if (!vulkan_implementation_) {
++    // Platform declined Vulkan (e.g. Ozone/Wayland). Silent fallback to GL.
++    return false;
++  }
++  if (!vulkan_implementation_->InitializeVulkanInstance(
+           !gpu_preferences_.disable_vulkan_surface)) {
+     LOG(ERROR) << "Failed to create and initialize Vulkan implementation.";
+     vulkan_implementation_ = nullptr;
+diff -urN a/ui/ozone/platform/wayland/gpu/wayland_surface_factory.cc b/ui/ozone/platform/wayland/gpu/wayland_surface_factory.cc
+--- a/ui/ozone/platform/wayland/gpu/wayland_surface_factory.cc	2026-08-29 18:45:02.897801447 +0200
++++ b/ui/ozone/platform/wayland/gpu/wayland_surface_factory.cc	2026-08-29 18:45:02.897608825 +0200
+@@ -246,9 +246,11 @@
+ std::unique_ptr<gpu::VulkanImplementation>
+ WaylandSurfaceFactory::CreateVulkanImplementation(bool use_swiftshader,
+                                                   bool allow_protected_memory) {
+-  LOG_IF(ERROR, !use_swiftshader)
+-      << "'--ozone-platform=wayland' is not compatible with Vulkan. "
+-         "Consider switching to '--ozone-platform=x11' or disabling Vulkan";
++  if (!use_swiftshader) {
++    // Native Vulkan is not usable with --ozone-platform=wayland.
++    // Returning null makes GpuInit disable Vulkan and continue on GL.
++    return nullptr;
++  }
+   return std::make_unique<VulkanImplementationWayland>(use_swiftshader);
+ }
+ #endif

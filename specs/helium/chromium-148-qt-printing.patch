@@ -1,0 +1,689 @@
+commit 00d17036343c60c15c3007b570727584df2d79e6
+Author: Bernhard Rosenkränzer <bero@lindev.ch>
+Date:   Sat May 23 02:51:48 2026 +0200
+
+    Add Qt printing support
+
+diff --git a/ui/qt/BUILD.gn b/ui/qt/BUILD.gn
+index d572ae72c8..099ee9376b 100644
+--- a/ui/qt/BUILD.gn
++++ b/ui/qt/BUILD.gn
+@@ -63,6 +63,7 @@ template("qt_shim") {
+   pkg_config("qt" + invoker.qt_version + "_config") {
+     packages = [
+       "Qt" + invoker.qt_version + "Core",
++      "Qt" + invoker.qt_version + "PrintSupport",
+       "Qt" + invoker.qt_version + "Widgets",
+     ]
+   }
+@@ -166,4 +167,13 @@ component("qt") {
+     "qt_ui.cc",
+     "qt_ui.h",
+   ]
++
++  if (enable_printing) {
++    sources += [
++      "printing/print_dialog_qt.cc",
++      "printing/print_dialog_qt.h",
++      "printing/printing_qt_util.cc",
++      "printing/printing_qt_util.h",
++    ]
++  }
+ }
+diff --git a/ui/qt/printing/print_dialog_qt.cc b/ui/qt/printing/print_dialog_qt.cc
+new file mode 100644
+index 0000000000..2e52bfebb8
+--- /dev/null
++++ b/ui/qt/printing/print_dialog_qt.cc
+@@ -0,0 +1,246 @@
++// Copyright 2025 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ui/qt/printing/print_dialog_qt.h"
++
++#include <memory>
++#include <string>
++#include <utility>
++
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/logging.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/task/thread_pool.h"
++#include "printing/buildflags/buildflags.h"
++#include "printing/metafile.h"
++#include "printing/mojom/print.mojom.h"
++#include "printing/print_job_constants.h"
++#include "printing/print_settings.h"
++#include "ui/qt/printing/printing_qt_util.h"
++
++#if BUILDFLAG(USE_CUPS)
++#include <cups/cups.h>
++#endif
++
++using printing::PageRanges;
++using printing::PrintSettings;
++
++PrintDialogQt::PrintDialogQt(PrintingContextLinux* context,
++                             qt::QtInterface* shim)
++    : context_(context),
++      shim_(shim),
++      task_runner_(base::SequencedTaskRunner::GetCurrentDefault()) {}
++
++PrintDialogQt::~PrintDialogQt() {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++}
++
++DISABLE_CFI_VCALL
++void PrintDialogQt::UseDefaultSettings() {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  qt::PrintingSettings qt_settings = shim_->GetDefaultPrintSettings();
++  printer_name_ =
++      qt_settings.printer_name.c_str() ? qt_settings.printer_name.c_str() : "";
++  copies_ = qt_settings.copies;
++  collate_ = qt_settings.collate;
++  landscape_ = qt_settings.landscape;
++
++  auto settings = std::make_unique<PrintSettings>();
++  InitPrintSettings(std::move(settings), qt_settings);
++}
++
++DISABLE_CFI_VCALL
++void PrintDialogQt::UpdateSettings(
++    std::unique_ptr<printing::PrintSettings> settings) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  std::string printer_name = base::UTF16ToUTF8(settings->device_name());
++  qt::PrintingSettings qt_settings =
++      shim_->GetPrinterSettings(qt::String(printer_name.c_str()));
++
++  // Apply requested settings that may differ from the printer defaults.
++  qt_settings.copies = settings->copies();
++  qt_settings.collate = settings->collate();
++  qt_settings.landscape = settings->landscape();
++  if (settings->dpi_horizontal() > 0) {
++    qt_settings.dpi = settings->dpi_horizontal();
++  }
++
++  printer_name_ =
++      qt_settings.printer_name.c_str() ? qt_settings.printer_name.c_str() : "";
++  copies_ = qt_settings.copies;
++  collate_ = qt_settings.collate;
++  landscape_ = qt_settings.landscape;
++
++  InitPrintSettings(std::move(settings), qt_settings);
++}
++
++#if BUILDFLAG(ENABLE_OOP_PRINTING_NO_OOP_BASIC_PRINT_DIALOG)
++DISABLE_CFI_VCALL
++void PrintDialogQt::LoadPrintSettings(const PrintSettings& settings) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  const std::string* stored_printer_name =
++      settings.system_print_dialog_data().FindString(
++          printing::kLinuxSystemPrintDialogDataPrinter);
++  if (stored_printer_name) {
++    printer_name_ = *stored_printer_name;
++    qt::PrintingSettings qt_settings =
++        shim_->GetPrinterSettings(qt::String(stored_printer_name->c_str()));
++    // Apply the settings we stored; no further Chrome-level reconciliation
++    // is needed because the printer settings already match the original
++    // dialog output.
++    auto new_settings = std::make_unique<PrintSettings>(settings);
++    InitPrintSettings(std::move(new_settings), qt_settings);
++  }
++}
++#endif  // BUILDFLAG(ENABLE_OOP_PRINTING_NO_OOP_BASIC_PRINT_DIALOG)
++
++DISABLE_CFI_VCALL
++void PrintDialogQt::ShowDialog(
++    gfx::NativeView parent_view,
++    bool has_selection,
++    PrintingContextLinux::PrintSettingsCallback callback) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  qt::PrintDialogResult result = shim_->ShowPrintDialog(has_selection);
++
++  if (!result.accepted) {
++    std::move(callback).Run(printing::mojom::ResultCode::kCanceled);
++    return;
++  }
++
++  if (!context_) {
++    std::move(callback).Run(printing::mojom::ResultCode::kCanceled);
++    return;
++  }
++
++  printer_name_ = result.settings.printer_name.c_str()
++                       ? result.settings.printer_name.c_str()
++                       : "";
++  copies_ = result.settings.copies;
++  collate_ = result.settings.collate;
++  landscape_ = result.settings.landscape;
++
++  // Handle page ranges.
++  PageRanges ranges_vector;
++  if (!result.selection_only && result.num_ranges > 0 && result.ranges) {
++    for (int i = 0; i < result.num_ranges; ++i) {
++      printing::PageRange range;
++      range.from = result.ranges[i].from;
++      range.to = result.ranges[i].to;
++      ranges_vector.push_back(range);
++    }
++  }
++  free(result.ranges);
++  result.ranges = nullptr;
++
++  auto settings = std::make_unique<PrintSettings>();
++  settings->set_is_modifiable(context_->settings().is_modifiable());
++  settings->set_ranges(ranges_vector);
++  settings->set_selection_only(result.selection_only);
++
++  InitPrintSettings(std::move(settings), result.settings);
++  std::move(callback).Run(printing::mojom::ResultCode::kSuccess);
++}
++
++void PrintDialogQt::PrintDocument(const printing::MetafilePlayer& metafile,
++                                  const std::u16string& document_name) {
++  bool success = base::CreateTemporaryFile(&path_to_pdf_);
++
++  if (success) {
++    base::File file;
++    file.Initialize(path_to_pdf_,
++                    base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE);
++    success = metafile.SaveTo(&file);
++    file.Close();
++    if (!success) {
++      base::DeleteFile(path_to_pdf_);
++    }
++  }
++
++  if (!success) {
++    LOG(ERROR) << "Saving metafile failed";
++    return;
++  }
++
++  // Continue printing on the UI thread.
++  task_runner_->PostTask(
++      FROM_HERE, base::BindOnce(&PrintDialogQt::SendDocumentToPrinter,
++                                weak_factory_.GetWeakPtr(), document_name));
++}
++
++void PrintDialogQt::SendDocumentToPrinter(
++    const std::u16string& document_name) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++
++  if (printer_name_.empty()) {
++    LOG(ERROR) << "Printing failed: no printer selected";
++    base::ThreadPool::PostTask(FROM_HERE,
++                               {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
++                                base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
++                               base::GetDeleteFileCallback(path_to_pdf_));
++    return;
++  }
++
++#if BUILDFLAG(USE_CUPS)
++  std::string title = base::UTF16ToUTF8(document_name);
++
++  int num_options = 0;
++  cups_option_t* options = nullptr;
++
++  std::string copies_str = base::NumberToString(copies_);
++  num_options =
++      cupsAddOption("copies", copies_str.c_str(), num_options, &options);
++  num_options = cupsAddOption("collate", collate_ ? "true" : "false",
++                              num_options, &options);
++  if (landscape_) {
++    num_options =
++        cupsAddOption("landscape", "true", num_options, &options);
++  }
++
++  int job_id = cupsPrintFile(printer_name_.c_str(),
++                             path_to_pdf_.value().c_str(), title.c_str(),
++                             num_options, options);
++
++  cupsFreeOptions(num_options, options);
++
++  if (job_id == 0) {
++    LOG(ERROR) << "CUPS printing failed: " << cupsLastErrorString();
++  }
++#else
++  LOG(ERROR) << "Printing is not supported without CUPS";
++#endif
++
++  base::ThreadPool::PostTask(FROM_HERE,
++                             {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
++                              base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
++                             base::GetDeleteFileCallback(path_to_pdf_));
++}
++
++void PrintDialogQt::InitPrintSettings(
++    std::unique_ptr<PrintSettings> settings,
++    const qt::PrintingSettings& qt_settings) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  if (!context_) {
++    return;
++  }
++
++  InitPrintSettingsQt(qt_settings, settings.get());
++
++#if BUILDFLAG(ENABLE_OOP_PRINTING_NO_OOP_BASIC_PRINT_DIALOG)
++  if (qt_settings.printer_name.c_str()) {
++    base::DictValue dialog_data;
++    dialog_data.Set(printing::kLinuxSystemPrintDialogDataPrinter,
++                    std::string(qt_settings.printer_name.c_str()));
++    settings->set_system_print_dialog_data(std::move(dialog_data));
++  }
++#endif
++
++  context_->InitWithSettings(std::move(settings));
++}
+\ No newline at end of file
+diff --git a/ui/qt/printing/print_dialog_qt.h b/ui/qt/printing/print_dialog_qt.h
+new file mode 100644
+index 0000000000..49eac775a0
+--- /dev/null
++++ b/ui/qt/printing/print_dialog_qt.h
+@@ -0,0 +1,78 @@
++// Copyright 2025 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef UI_QT_PRINTING_PRINT_DIALOG_QT_H_
++#define UI_QT_PRINTING_PRINT_DIALOG_QT_H_
++
++#include <memory>
++#include <string>
++
++#include "base/files/file_path.h"
++#include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
++#include "base/sequence_checker.h"
++#include "base/task/sequenced_task_runner.h"
++#include "printing/buildflags/buildflags.h"
++#include "printing/print_dialog_linux_interface.h"
++#include "printing/printing_context_linux.h"
++#include "ui/qt/qt_interface.h"
++
++namespace printing {
++class MetafilePlayer;
++class PrintSettings;
++}  // namespace printing
++
++using printing::PrintingContextLinux;
++
++// Qt implementation of the Linux print dialog interface.
++class PrintDialogQt : public printing::PrintDialogLinuxInterface {
++ public:
++  PrintDialogQt(PrintingContextLinux* context, qt::QtInterface* shim);
++
++  PrintDialogQt(const PrintDialogQt&) = delete;
++  PrintDialogQt& operator=(const PrintDialogQt&) = delete;
++  ~PrintDialogQt() override;
++
++  // printing::PrintDialogLinuxInterface implementation.
++  void UseDefaultSettings() override;
++  void UpdateSettings(
++      std::unique_ptr<printing::PrintSettings> settings) override;
++#if BUILDFLAG(ENABLE_OOP_PRINTING_NO_OOP_BASIC_PRINT_DIALOG)
++  void LoadPrintSettings(const printing::PrintSettings& settings) override;
++#endif
++  void ShowDialog(
++      gfx::NativeView parent_view,
++      bool has_selection,
++      PrintingContextLinux::PrintSettingsCallback callback) override;
++  void PrintDocument(const printing::MetafilePlayer& metafile,
++                     const std::u16string& document_name) override;
++
++ private:
++  // Initializes |context_|'s PrintSettings from Qt printing settings.
++  void InitPrintSettings(std::unique_ptr<printing::PrintSettings> settings,
++                         const qt::PrintingSettings& qt_settings);
++
++  // Sends the document to the printer via CUPS.
++  void SendDocumentToPrinter(const std::u16string& document_name);
++
++  raw_ptr<PrintingContextLinux> context_;
++  raw_ptr<qt::QtInterface> shim_;
++
++  // Stored printer settings from the last dialog/settings update, used for
++  // submitting the print job via CUPS.
++  std::string printer_name_;
++  int copies_ = 1;
++  bool collate_ = false;
++  bool landscape_ = false;
++
++  base::FilePath path_to_pdf_;
++
++  const scoped_refptr<base::SequencedTaskRunner> task_runner_;
++
++  SEQUENCE_CHECKER(sequence_checker_);
++
++  base::WeakPtrFactory<PrintDialogQt> weak_factory_{this};
++};
++
++#endif  // UI_QT_PRINTING_PRINT_DIALOG_QT_H_
+\ No newline at end of file
+diff --git a/ui/qt/printing/printing_qt_util.cc b/ui/qt/printing/printing_qt_util.cc
+new file mode 100644
+index 0000000000..ab3a70bb16
+--- /dev/null
++++ b/ui/qt/printing/printing_qt_util.cc
+@@ -0,0 +1,56 @@
++// Copyright 2025 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ui/qt/printing/printing_qt_util.h"
++
++#include <string>
++
++#include "base/strings/utf_string_conversions.h"
++#include "printing/print_settings.h"
++#include "printing/units.h"
++#include "ui/gfx/geometry/size.h"
++
++void InitPrintSettingsQt(const qt::PrintingSettings& qt_settings,
++                         printing::PrintSettings* print_settings) {
++  DCHECK(print_settings);
++
++  const char* printer_name = qt_settings.printer_name.c_str();
++  std::u16string name =
++      printer_name ? base::UTF8ToUTF16(printer_name) : std::u16string();
++  print_settings->set_device_name(name);
++
++  int dpi = qt_settings.dpi;
++  if (dpi <= 0) {
++    dpi = printing::kDefaultPdfDpi;
++  }
++
++  gfx::Size physical_size_device_units;
++  gfx::Rect printable_area_device_units;
++
++  physical_size_device_units.SetSize(
++      qt_settings.page_width_inches * dpi,
++      qt_settings.page_height_inches * dpi);
++
++  printable_area_device_units.SetRect(
++      qt_settings.margin_left_inches * dpi,
++      qt_settings.margin_top_inches * dpi,
++      qt_settings.printable_width_inches * dpi,
++      qt_settings.printable_height_inches * dpi);
++
++  print_settings->set_dpi(dpi);
++  print_settings->SetOrientation(qt_settings.landscape);
++  DCHECK_EQ(print_settings->device_units_per_inch(), dpi);
++  print_settings->SetPrinterPrintableArea(physical_size_device_units,
++                                          printable_area_device_units, true);
++}
++
++DISABLE_CFI_VCALL
++gfx::Size GetPdfPaperSizeDeviceUnitsQt(qt::QtInterface* shim,
++                                        int device_units_per_inch) {
++  float width_inches = 0;
++  float height_inches = 0;
++  shim->GetDefaultPaperSize(&width_inches, &height_inches);
++  return gfx::Size(width_inches * device_units_per_inch,
++                   height_inches * device_units_per_inch);
++}
+\ No newline at end of file
+diff --git a/ui/qt/printing/printing_qt_util.h b/ui/qt/printing/printing_qt_util.h
+new file mode 100644
+index 0000000000..7c6a74913b
+--- /dev/null
++++ b/ui/qt/printing/printing_qt_util.h
+@@ -0,0 +1,23 @@
++// Copyright 2025 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef UI_QT_PRINTING_PRINTING_QT_UTIL_H_
++#define UI_QT_PRINTING_PRINTING_QT_UTIL_H_
++
++#include "ui/gfx/geometry/size.h"
++#include "ui/qt/qt_interface.h"
++
++namespace printing {
++class PrintSettings;
++}  // namespace printing
++
++// Initializes a PrintSettings object from Qt printing settings.
++void InitPrintSettingsQt(const qt::PrintingSettings& qt_settings,
++                         printing::PrintSettings* print_settings);
++
++// Obtains the paper size through Qt.
++gfx::Size GetPdfPaperSizeDeviceUnitsQt(qt::QtInterface* shim,
++                                        int device_units_per_inch);
++
++#endif  // UI_QT_PRINTING_PRINTING_QT_UTIL_H_
+\ No newline at end of file
+diff --git a/ui/qt/qt_interface.h b/ui/qt/qt_interface.h
+index c6f4910dd1..40de81d7b5 100644
+--- a/ui/qt/qt_interface.h
++++ b/ui/qt/qt_interface.h
+@@ -118,6 +118,39 @@ struct MonitorScale {
+   float scale;
+ };
+ 
++// Printing settings exchanged across the shim boundary.
++struct PrintingSettings {
++  String printer_name;
++  int dpi = 0;
++  int copies = 1;
++  bool collate = false;
++  bool landscape = false;
++  // Physical page dimensions in inches.
++  float page_width_inches = 0;
++  float page_height_inches = 0;
++  // Margins in inches.
++  float margin_left_inches = 0;
++  float margin_top_inches = 0;
++  // Printable area dimensions in inches.
++  float printable_width_inches = 0;
++  float printable_height_inches = 0;
++};
++
++struct PrintRange {
++  int from;
++  int to;
++};
++
++// Result of showing a print dialog.
++struct PrintDialogResult {
++  bool accepted = false;
++  bool selection_only = false;
++  PrintingSettings settings;
++  int num_ranges = 0;
++  // Allocated with malloc(), caller must free().
++  PrintRange* ranges = nullptr;
++};
++
+ class QtInterface {
+  public:
+   class Delegate {
+@@ -152,6 +185,14 @@ class QtInterface {
+                            bool use_custom_frame) const = 0;
+   virtual int GetCursorBlinkIntervalMs() const = 0;
+   virtual int GetAnimationDurationMs() const = 0;
++
++  // Printing support.
++  virtual void GetDefaultPaperSize(float* width_inches,
++                                   float* height_inches) const = 0;
++  virtual PrintingSettings GetDefaultPrintSettings() const = 0;
++  virtual PrintingSettings GetPrinterSettings(
++      const String& printer_name) const = 0;
++  virtual PrintDialogResult ShowPrintDialog(bool has_selection) = 0;
+ };
+ 
+ }  // namespace qt
+diff --git a/ui/qt/qt_shim.cc b/ui/qt/qt_shim.cc
+index 6a537293b7..8bed9e9ac1 100644
+--- a/ui/qt/qt_shim.cc
++++ b/ui/qt/qt_shim.cc
+@@ -21,6 +21,9 @@
+ #include <QMimeType>
+ #include <QPainter>
+ #include <QPalette>
++#include <QPrintDialog>
++#include <QPrinter>
++#include <QPrinterInfo>
+ #include <QScreen>
+ #include <QStyle>
+ #include <QStyleOptionTitleBar>
+@@ -388,6 +391,92 @@ QImage QtShim::DrawHeaderImpl(int width,
+   return image;
+ }
+ 
++PrintingSettings PrintSettingsFromPrinter(const QPrinter& printer) {
++  PrintingSettings settings;
++  settings.printer_name =
++      String(printer.printerName().toStdString().c_str());
++  settings.dpi = printer.resolution();
++  settings.copies = printer.copyCount();
++  settings.collate = printer.collateCopies();
++  settings.landscape =
++      printer.pageLayout().orientation() == QPageLayout::Landscape;
++
++  QRectF paper_rect =
++      printer.pageLayout().fullRect(QPageLayout::Inch);
++  settings.page_width_inches = paper_rect.width();
++  settings.page_height_inches = paper_rect.height();
++
++  QMarginsF margins =
++      printer.pageLayout().margins(QPageLayout::Inch);
++  settings.margin_left_inches = margins.left();
++  settings.margin_top_inches = margins.top();
++
++  QRectF printable_rect =
++      printer.pageLayout().paintRect(QPageLayout::Inch);
++  settings.printable_width_inches = printable_rect.width();
++  settings.printable_height_inches = printable_rect.height();
++  return settings;
++}
++
++void QtShim::GetDefaultPaperSize(float* width_inches,
++                                 float* height_inches) const {
++  QPrinter printer;
++  QRectF paper_rect =
++      printer.pageLayout().fullRect(QPageLayout::Inch);
++  *width_inches = paper_rect.width();
++  *height_inches = paper_rect.height();
++}
++
++PrintingSettings QtShim::GetDefaultPrintSettings() const {
++  QPrinter printer;
++  return PrintSettingsFromPrinter(printer);
++}
++
++PrintingSettings QtShim::GetPrinterSettings(
++    const String& printer_name) const {
++  QPrinterInfo info =
++      QPrinterInfo::printerInfo(QString::fromUtf8(printer_name.c_str()));
++  if (info.isNull()) {
++    return GetDefaultPrintSettings();
++  }
++  QPrinter printer(info);
++  return PrintSettingsFromPrinter(printer);
++}
++
++PrintDialogResult QtShim::ShowPrintDialog(bool has_selection) {
++  PrintDialogResult result;
++  result.accepted = false;
++  result.selection_only = false;
++  result.num_ranges = 0;
++  result.ranges = nullptr;
++
++  QPrinter printer(QPrinter::HighResolution);
++  QPrintDialog dialog(&printer);
++  dialog.setOption(QAbstractPrintDialog::PrintPageRange, true);
++  if (has_selection) {
++    dialog.setOption(QAbstractPrintDialog::PrintSelection, true);
++  }
++
++  if (dialog.exec() != QDialog::Accepted) {
++    return result;
++  }
++
++  result.accepted = true;
++  result.selection_only =
++      dialog.printRange() == QAbstractPrintDialog::Selection;
++  result.settings = PrintSettingsFromPrinter(printer);
++
++  if (dialog.printRange() == QAbstractPrintDialog::PageRange) {
++    result.num_ranges = 1;
++    result.ranges =
++        static_cast<PrintRange*>(malloc(sizeof(PrintRange)));
++    result.ranges[0].from = dialog.fromPage() - 1;
++    result.ranges[0].to = dialog.toPage() - 1;
++  }
++
++  return result;
++}
++
+ }  // namespace qt
+ 
+ qt::QtInterface* CreateQtInterface(qt::QtInterface::Delegate* delegate,
+diff --git a/ui/qt/qt_shim.h b/ui/qt/qt_shim.h
+index 70ea869840..5abb6a1ea1 100644
+--- a/ui/qt/qt_shim.h
++++ b/ui/qt/qt_shim.h
+@@ -10,6 +10,7 @@
+ #include <QApplication>
+ #include <QImage>
+ #include <QObject>
++#include <QPrinter>
+ 
+ #include "ui/qt/qt_interface.h"
+ 
+@@ -41,6 +42,12 @@ class QtShim : public QObject, public QtInterface {
+                    bool use_custom_frame) const override;
+   int GetCursorBlinkIntervalMs() const override;
+   int GetAnimationDurationMs() const override;
++  void GetDefaultPaperSize(float* width_inches,
++                           float* height_inches) const override;
++  PrintingSettings GetDefaultPrintSettings() const override;
++  PrintingSettings GetPrinterSettings(
++      const String& printer_name) const override;
++  PrintDialogResult ShowPrintDialog(bool has_selection) override;
+ 
+  private slots:
+   void FontChanged(const QFont& font);
+diff --git a/ui/qt/qt_ui.cc b/ui/qt/qt_ui.cc
+index 25eb5aeadb..54be2755c4 100644
+--- a/ui/qt/qt_ui.cc
++++ b/ui/qt/qt_ui.cc
+@@ -58,6 +58,8 @@
+ 
+ #if BUILDFLAG(ENABLE_PRINTING)
+ #include "printing/print_dialog_linux_interface.h"  // nogncheck
++#include "ui/qt/printing/print_dialog_qt.h"
++#include "ui/qt/printing/printing_qt_util.h"
+ #endif
+ 
+ namespace qt {
+@@ -444,15 +446,17 @@ ui::TextEditCommand QtUi::GetTextEditCommandForEvent(const ui::Event& event,
+ }
+ 
+ #if BUILDFLAG(ENABLE_PRINTING)
++DISABLE_CFI_VCALL
+ std::unique_ptr<printing::PrintDialogLinuxInterface> QtUi::CreatePrintDialog(
+     printing::PrintingContextLinux* context) {
+-  return fallback_linux_ui_ ? fallback_linux_ui_->CreatePrintDialog(context)
+-                            : nullptr;
++  return std::make_unique<PrintDialogQt>(context, shim_.get());
+ }
+ 
++DISABLE_CFI_VCALL
+ gfx::Size QtUi::GetPdfPaperSize(printing::PrintingContextLinux* context) {
+-  return fallback_linux_ui_ ? fallback_linux_ui_->GetPdfPaperSize(context)
+-                            : gfx::Size();
++  const printing::PrintSettings& settings = context->settings();
++  return GetPdfPaperSizeDeviceUnitsQt(shim_.get(),
++                                       settings.device_units_per_inch());
+ }
+ #endif
+ 

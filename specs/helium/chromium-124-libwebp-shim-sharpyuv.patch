@@ -1,0 +1,14 @@
+diff -up chromium-126.0.6478.36/build/linux/unbundle/libwebp.gn.12~ chromium-126.0.6478.36/build/linux/unbundle/libwebp.gn
+--- chromium-126.0.6478.36/build/linux/unbundle/libwebp.gn.12~	2024-06-06 23:46:35.099664976 +0200
++++ chromium-126.0.6478.36/build/linux/unbundle/libwebp.gn	2024-06-06 23:50:12.834009247 +0200
+@@ -32,8 +32,8 @@ shim_headers("libwebp_shim") {
+ shim_headers("libsharpyuv_shim") {
+   root_path = "src"
+   headers = [
+-    "sharpyuv/sharpyuv.h",
+-    "sharpyuv/sharpyuv_csp.h",
++    "webp/sharpyuv/sharpyuv.h",
++    "webp/sharpyuv/sharpyuv_csp.h",
+   ]
+ }
+ 

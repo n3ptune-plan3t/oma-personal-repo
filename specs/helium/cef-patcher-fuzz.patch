@@ -1,0 +1,27 @@
+--- a/tools/git_util.py	2026-07-30 22:09:36.000000000 +0200
++++ b/tools/git_util.py	2026-08-02 01:10:02.254206739 +0200
+@@ -127,7 +127,8 @@
+ 
+ def _patch_apply_patch_string(patch_dir, patch_string):
+   """ Fallback to using the patch tool. """
+-  config = '-p0 --ignore-whitespace --force'
++  # --fuzz=3: Helium/ungoogled often shifts context without changing intent.
++  config = '-p0 --ignore-whitespace --force --fuzz=3'
+ 
+   # Reverse check to see if the patch has already been applied.
+   cmd = '%s %s --reverse --dry-run' % (patch_exe, config)
+@@ -167,8 +168,12 @@
+     # whitespace errors with git apply.
+     patch_string = patch_string.replace(b'\r\n', b'\n')
+ 
+-  # Git apply fails silently if not run relative to a respository root.
+-  # Fallback to using the patch tool in that case.
++  # Git apply is too strict against Helium/ungoogled context shifts. Always use
++  # patch(1) with fuzz for nested Chromium patches (works for tarball trees and
++  # for bare `git init` checkouts without real history).
++  return _patch_apply_patch_string(patch_dir, patch_string)
++
++  # Unreachable: retained so future CEF updates can restore git apply easily.
+   if not is_checkout(patch_dir):
+     return _patch_apply_patch_string(patch_dir, patch_string)
+ 

@@ -1,0 +1,13 @@
+diff -up chromium-148.0.7778.96/v8/src/base/macros.h.omv~ chromium-148.0.7778.96/v8/src/base/macros.h
+--- chromium-148.0.7778.96/v8/src/base/macros.h.omv~	2026-05-10 16:25:05.159904531 +0200
++++ chromium-148.0.7778.96/v8/src/base/macros.h	2026-05-10 16:24:43.468767624 +0200
+@@ -224,7 +224,7 @@ V8_INLINE constexpr Dest bit_cast(Source
+ 
+ // Define V8_USE_UNDEFINED_BEHAVIOR_SANITIZER macro.
+ #if defined(__has_feature)
+-#if __has_feature(undefined_behavior_sanitizer)
++#if __has_feature(undefined_behavior_sanitizer) && defined(__SANITIZE_UNDEFINED__)
+ #define V8_USE_UNDEFINED_BEHAVIOR_SANITIZER 1
+ #endif
+ #endif
+diff -up chromium-148.0.7778.96/v8/src/sandbox/testing.cc.omv~ chromium-148.0.7778.96/v8/src/sandbox/testing.cc

@@ -1,0 +1,14 @@
+# Fix abs()/math for material_color_utilities with system libstdc++ / clang
+
+diff -urN a/third_party/material_color_utilities/src/cpp/palettes/tones.cc b/third_party/material_color_utilities/src/cpp/palettes/tones.cc
+--- a/third_party/material_color_utilities/src/cpp/palettes/tones.cc	2026-08-02 01:06:09.998694361 +0200
++++ b/third_party/material_color_utilities/src/cpp/palettes/tones.cc	2026-08-02 01:06:09.998730531 +0200
+@@ -79,7 +79,7 @@
+     if (sufficient_chroma) {
+       // Either range [lower_tone, mid_tone] or [mid_tone, upper_tone] has
+       // the answer, so search in the range that is closer the pivot tone.
+-      if (abs(lower_tone - pivot_tone) < abs(upper_tone - pivot_tone)) {
++      if (std::abs(lower_tone - pivot_tone) < std::abs(upper_tone - pivot_tone)) {
+         upper_tone = mid_tone;
+       } else {
+         if (lower_tone == mid_tone) {

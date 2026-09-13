@@ -1,0 +1,23 @@
+diff -up chromium-136.0.7103.59/chrome/test/chromedriver/chrome/chrome_finder.cc.27~ chromium-136.0.7103.59/chrome/test/chromedriver/chrome/chrome_finder.cc
+--- chromium-136.0.7103.59/chrome/test/chromedriver/chrome/chrome_finder.cc.27~	2025-04-28 01:35:55.000000000 +0200
++++ chromium-136.0.7103.59/chrome/test/chromedriver/chrome/chrome_finder.cc	2025-05-01 21:22:02.668615823 +0200
+@@ -70,7 +70,7 @@ void GetApplicationDirs(std::vector<base
+   locations->emplace_back("/bin");
+   // Lastly, try the default installation location.
+   locations->emplace_back("/opt/google/chrome");
+-  locations->emplace_back("/opt/ch40m1um.qjz9zk/chromium");
++  locations->emplace_back("/opt/chromium.org/chromium");
+ }
+ #elif BUILDFLAG(IS_ANDROID)
+ void GetApplicationDirs(std::vector<base::FilePath>* locations) {
+@@ -126,9 +126,7 @@ std::vector<base::FilePath> GetChromePro
+         base::FilePath(chrome::kGoogleChromeBrowserProcessExecutablePath),
+         base::FilePath(chrome::kChromiumBrowserProcessExecutablePath),
+ #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+-    base::FilePath(chrome::kBrowserProcessExecutablePath),
+-        base::FilePath("chrome"),  // Chrome for Testing or Google Chrome
+-        base::FilePath("google-chrome"), base::FilePath("chromium"),
++        base::FilePath("chromium"),
+         base::FilePath("chromium-browser"),
+ #else
+     // it will compile but won't work on other OSes

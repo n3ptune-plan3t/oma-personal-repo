@@ -1,0 +1,25 @@
+diff -up chromium-139.0.7258.127/chrome/browser/about_flags.cc.60~ chromium-139.0.7258.127/chrome/browser/about_flags.cc
+--- chromium-139.0.7258.127/chrome/browser/about_flags.cc.60~	2025-08-18 03:39:47.589997633 +0200
++++ chromium-139.0.7258.127/chrome/browser/about_flags.cc	2025-08-18 03:43:41.703193286 +0200
+@@ -4907,10 +4907,10 @@ const FeatureEntry kFeatureEntries[] = {
+      flag_descriptions::kUiPartialSwapDescription, kOsAll,
+      SINGLE_DISABLE_VALUE_TYPE(switches::kUIDisablePartialSwap)},
+     {"webrtc-hw-decoding", flag_descriptions::kWebrtcHwDecodingName,
+-     flag_descriptions::kWebrtcHwDecodingDescription, kOsAndroid | kOsCrOS,
++     flag_descriptions::kWebrtcHwDecodingDescription, kOsAndroid | kOsCrOS | kOsLinux,
+      FEATURE_VALUE_TYPE(features::kWebRtcHWDecoding)},
+     {"webrtc-hw-encoding", flag_descriptions::kWebrtcHwEncodingName,
+-     flag_descriptions::kWebrtcHwEncodingDescription, kOsAndroid | kOsCrOS,
++     flag_descriptions::kWebrtcHwEncodingDescription, kOsAndroid | kOsCrOS | kOsLinux,
+      FEATURE_VALUE_TYPE(features::kWebRtcHWEncoding)},
+     {"webrtc-pqc-for-dtls", flag_descriptions::kWebRtcPqcForDtlsName,
+      flag_descriptions::kWebRtcPqcForDtlsDescription, kOsAll,
+@@ -5357,7 +5357,7 @@ const FeatureEntry kFeatureEntries[] = {
+         "disable-accelerated-video-encode",
+         flag_descriptions::kAcceleratedVideoEncodeName,
+         flag_descriptions::kAcceleratedVideoEncodeDescription,
+-        kOsMac | kOsWin | kOsCrOS | kOsAndroid,
++        kOsMac | kOsWin | kOsCrOS | kOsAndroid | kOsLinux,
+         SINGLE_DISABLE_VALUE_TYPE(switches::kDisableAcceleratedVideoEncode),
+     },
+ #if BUILDFLAG(IS_WIN)

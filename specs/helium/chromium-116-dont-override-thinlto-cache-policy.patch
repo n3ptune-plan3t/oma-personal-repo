@@ -1,0 +1,57 @@
+diff -up chromium-132.0.6834.83/build/config/compiler/BUILD.gn.53~ chromium-132.0.6834.83/build/config/compiler/BUILD.gn
+--- chromium-132.0.6834.83/build/config/compiler/BUILD.gn.53~	2025-01-07 20:49:02.000000000 +0100
++++ chromium-132.0.6834.83/build/config/compiler/BUILD.gn	2025-01-13 04:14:00.628168850 +0100
+@@ -739,26 +739,26 @@ config("compiler") {
+       "-fsplit-lto-unit",
+     ]
+ 
+-    if (thin_lto_enable_cache) {
++    #if (thin_lto_enable_cache) {
+       # Limit the size of the ThinLTO cache to the lesser of 10% of
+       # available disk space, 40GB and 100000 files.
+-      cache_policy =
+-          "cache_size=10%:cache_size_bytes=40g:cache_size_files=100000"
+-      cache_dir = rebase_path("$root_out_dir/thinlto-cache", root_build_dir)
+-      if (is_win) {
+-        ldflags += [
+-          "/lldltocache:$cache_dir",
+-          "/lldltocachepolicy:$cache_policy",
+-        ]
+-      } else {
+-        if (is_apple) {
+-          ldflags += [ "-Wl,-cache_path_lto,$cache_dir" ]
+-        } else {
+-          ldflags += [ "-Wl,--thinlto-cache-dir=$cache_dir" ]
+-        }
+-        ldflags += [ "-Wl,--thinlto-cache-policy=$cache_policy" ]
+-      }
+-    }
++      #cache_policy =
++      #    "cache_size=10%:cache_size_bytes=40g:cache_size_files=100000"
++      #cache_dir = rebase_path("$root_out_dir/thinlto-cache", root_build_dir)
++      #if (is_win) {
++      #  ldflags += [
++      #    "/lldltocache:$cache_dir",
++      #    "/lldltocachepolicy:$cache_policy",
++      #  ]
++      #} else {
++      #  if (is_apple) {
++      #    ldflags += [ "-Wl,-cache_path_lto,$cache_dir" ]
++      #  } else {
++      #    ldflags += [ "-Wl,--thinlto-cache-dir=$cache_dir" ]
++      #  }
++      #  ldflags += [ "-Wl,--thinlto-cache-policy=$cache_policy" ]
++      #}
++    #}
+ 
+     # An import limit of 30 has better performance (per speedometer) and lower
+     # binary size than the default setting of 100.
+@@ -2320,8 +2320,6 @@ config("thin_archive") {
+       "-T",
+       "-S",
+     ]
+-  } else if (is_win && use_lld) {
+-    arflags = [ "/llvmlibthin" ]
+   }
+ }
+ 

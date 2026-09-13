@@ -1,0 +1,14 @@
+description: use system jpeg library
+author: Michael Gilbert <mgilbert@debian.org>
+
+diff -urN a/BUILD.gn b/BUILD.gn
+--- a/BUILD.gn	2026-08-02 01:07:11.343294507 +0200
++++ b/BUILD.gn	2026-08-02 01:07:11.343350428 +0200
+@@ -731,7 +731,6 @@
+       }
+       deps += [
+         "//third_party/leveldatabase:leveldb_test_targets",
+-        "//third_party/libjpeg_turbo:simd",
+         "//third_party/opus:opus_compare",
+         "//third_party/opus:opus_demo",
+         "//third_party/opus:test_opus_api",

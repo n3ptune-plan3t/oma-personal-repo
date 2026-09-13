@@ -1,0 +1,16 @@
+diff -up chromium-147.0.7727.116/build/config/compiler/BUILD.gn.omv~ chromium-147.0.7727.116/build/config/compiler/BUILD.gn
+--- chromium-147.0.7727.116/build/config/compiler/BUILD.gn.omv~	2026-04-29 02:49:16.184843870 +0200
++++ chromium-147.0.7727.116/build/config/compiler/BUILD.gn	2026-04-29 02:49:27.673908474 +0200
+@@ -617,9 +617,9 @@ config("compiler") {
+     # The performance improvement does not seem worth the risk. See
+     # https://crbug.com/484082200 for background and https://crrev.com/c/7593035
+     # for discussion.
+-    if (!is_wasm) {
+-      cflags += [ "-fno-lifetime-dse" ]
+-    }
++    #if (!is_wasm) {
++    #  cflags += [ "-fno-lifetime-dse" ]
++    #}
+ 
+     # TODO(hans): Remove this once Clang generates better optimized debug info
+     # by default. https://crbug.com/765793

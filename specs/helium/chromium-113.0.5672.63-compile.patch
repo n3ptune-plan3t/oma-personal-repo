@@ -1,0 +1,13 @@
+diff -up chromium-145.0.7632.116/media/video/av1_video_encoder.cc.47~ chromium-145.0.7632.116/media/video/av1_video_encoder.cc
+--- chromium-145.0.7632.116/media/video/av1_video_encoder.cc.47~	2026-02-20 21:20:04.000000000 +0100
++++ chromium-145.0.7632.116/media/video/av1_video_encoder.cc	2026-02-27 18:52:00.123543871 +0100
+@@ -557,7 +557,9 @@ void Av1VideoEncoder::Encode(scoped_refp
+     }
+     qp = std::clamp(qp, static_cast<int>(config_.rc_min_quantizer),
+                     static_cast<int>(config_.rc_max_quantizer));
++#ifdef AV1E_SET_QUANTIZER_ONE_PASS
+     aom_codec_control(codec_.get(), AV1E_SET_QUANTIZER_ONE_PASS, qp);
++#endif
+   }
+ 
+   if (options_.manual_reference_buffer_control) {

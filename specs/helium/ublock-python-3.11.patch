@@ -1,0 +1,22 @@
+diff -up chromium-140.0.7339.213/third_party/ublock/generate_file_list.py.omv~ chromium-140.0.7339.213/third_party/ublock/generate_file_list.py
+--- chromium-140.0.7339.213/third_party/ublock/generate_file_list.py.omv~	2025-10-02 20:57:04.942178378 +0200
++++ chromium-140.0.7339.213/third_party/ublock/generate_file_list.py	2025-10-02 21:07:47.627512794 +0200
+@@ -5,6 +5,7 @@
+ import json
+ from sys import argv
+ from pathlib import Path
++import os
+ 
+ ublock_src = Path(argv[1])
+ out_file = argv[2]
+@@ -12,8 +13,8 @@ out_file = argv[2]
+ with open(out_file, 'w') as f:
+   f.write(json.dumps(
+     { "base_dir": ublock_src.as_posix(),
+-      "files":   [ (root / file).relative_to(ublock_src).as_posix()
+-                   for root, _, files in ublock_src.walk()
++      "files":   [ Path(root + "/" + file).relative_to(ublock_src).as_posix()
++                   for root, _, files in os.walk(ublock_src)
+                    for file in files ]
+     }
+   ))

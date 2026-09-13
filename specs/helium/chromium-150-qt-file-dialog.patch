@@ -1,0 +1,560 @@
+diff -Naur a/ui/qt/BUILD.gn b/ui/qt/BUILD.gn
+--- a/ui/qt/BUILD.gn	2026-07-26 14:46:56.415115334 +0200
++++ b/ui/qt/BUILD.gn	2026-07-26 14:46:56.418892803 +0200
+@@ -146,6 +146,7 @@
+     "//base",
+     "//cc/paint",
+     "//printing/buildflags",
++    "//ui/base",
+     "//ui/base/ime/linux",
+     "//ui/color",
+     "//ui/color:mixers",
+@@ -153,6 +154,7 @@
+     "//ui/linux:linux_ui",
+     "//ui/native_theme",
+     "//ui/shell_dialogs",
++    "//ui/strings",
+     "//ui/views",
+   ]
+   public_deps = [ "//skia" ]
+@@ -167,6 +169,8 @@
+     "os_settings_provider_qt.h",
+     "qt_ui.cc",
+     "qt_ui.h",
++    "select_file_dialog_linux_qt.cc",
++    "select_file_dialog_linux_qt.h",
+   ]
+ 
+   if (enable_printing) {
+diff -Naur a/ui/qt/qt_interface.h b/ui/qt/qt_interface.h
+--- a/ui/qt/qt_interface.h	2026-07-26 14:46:56.379261840 +0200
++++ b/ui/qt/qt_interface.h	2026-07-26 14:46:56.387706352 +0200
+@@ -151,6 +151,27 @@
+   PrintRange* ranges = nullptr;
+ };
+ 
++// Types of file selection dialogs.
++enum class SelectFileDialogType {
++  kOpenFile = 0,
++  kOpenMultiFile = 1,
++  kSaveFile = 2,
++  kFolder = 3,
++  kExistingFolder = 4,
++  kUploadFolder = 5,
++};
++
++// Result of showing a file selection dialog.
++// |files| is a malloc'd array of strdup'd paths; caller must free each
++// entry and then free the array itself.
++struct SelectFileResult {
++  bool accepted = false;
++  // 1-based index of the selected filter (matches SelectFileDialog convention).
++  int filter_index = 1;
++  int num_files = 0;
++  char** files = nullptr;
++};
++
+ class QtInterface {
+  public:
+   class Delegate {
+@@ -193,6 +214,19 @@
+   virtual PrintingSettings GetPrinterSettings(
+       const String& printer_name) const = 0;
+   virtual PrintDialogResult ShowPrintDialog(bool has_selection) = 0;
++
++  // File selection dialog. |filter_names| and |filter_patterns| are parallel
++  // arrays of length |num_filters|. Each pattern string is a space-separated
++  // list of shell globs (e.g. "*.png *.jpg").
++  virtual SelectFileResult ShowSelectFileDialog(
++      SelectFileDialogType type,
++      const String& title,
++      const String& default_path,
++      int default_filter_index,
++      int num_filters,
++      const String* filter_names,
++      const String* filter_patterns,
++      bool include_all_files) = 0;
+ };
+ 
+ }  // namespace qt
+diff -Naur a/ui/qt/qt_shim.cc b/ui/qt/qt_shim.cc
+--- a/ui/qt/qt_shim.cc	2026-07-26 14:46:56.399563865 +0200
++++ b/ui/qt/qt_shim.cc	2026-07-26 14:46:56.404101500 +0200
+@@ -7,16 +7,21 @@
+ #include "ui/qt/qt_shim.h"
+ 
+ #include <QApplication>
++#include <cstdlib>
++#include <cstring>
++#include <QFileDialog>
++#include <QFileInfo>
+ #include <QFont>
+ #include <QIcon>
+ #include <QMimeDatabase>
+ #include <QMimeType>
+ #include <QPainter>
+ #include <QPalette>
+ #include <QPrintDialog>
+ #include <QPrinter>
+ #include <QPrinterInfo>
+ #include <QScreen>
++#include <QStringList>
+ #include <QStyle>
+ #include <QStyleOptionTitleBar>
+ #include <cmath>
+@@ -489,6 +495,145 @@
+   }
+ 
+   return result;
++}
++
++SelectFileResult QtShim::ShowSelectFileDialog(
++    SelectFileDialogType type,
++    const String& title,
++    const String& default_path,
++    int default_filter_index,
++    int num_filters,
++    const String* filter_names,
++    const String* filter_patterns,
++    bool include_all_files) {
++  SelectFileResult result;
++  result.accepted = false;
++  result.filter_index = default_filter_index > 0 ? default_filter_index : 1;
++  result.num_files = 0;
++  result.files = nullptr;
++
++  QFileDialog dialog;
++  dialog.setOption(QFileDialog::DontUseNativeDialog, false);
++  if (title.c_str()) {
++    dialog.setWindowTitle(QString::fromUtf8(title.c_str()));
++  }
++
++  QStringList name_filters;
++  for (int i = 0; i < num_filters; ++i) {
++    QString name =
++        filter_names[i].c_str()
++            ? QString::fromUtf8(filter_names[i].c_str())
++            : QString();
++    QString patterns =
++        filter_patterns[i].c_str()
++            ? QString::fromUtf8(filter_patterns[i].c_str())
++            : QString();
++    if (patterns.isEmpty()) {
++      continue;
++    }
++    if (name.isEmpty()) {
++      name = patterns;
++    } else {
++      name = name + " (" + patterns + ")";
++    }
++    // QFileDialog expects patterns separated by spaces inside the
++    // parenthesized section of "Name (*.ext1 *.ext2)".
++    name_filters << name;
++  }
++  if (include_all_files && !name_filters.isEmpty()) {
++    name_filters << QStringLiteral("All Files (*)");
++  }
++  if (!name_filters.isEmpty()) {
++    dialog.setNameFilters(name_filters);
++    int filter_idx = default_filter_index - 1;
++    if (filter_idx >= 0 && filter_idx < name_filters.size()) {
++      dialog.selectNameFilter(name_filters.at(filter_idx));
++    }
++  }
++
++  QString start_path =
++      default_path.c_str() ? QString::fromUtf8(default_path.c_str())
++                           : QString();
++
++  switch (type) {
++    case SelectFileDialogType::kOpenFile:
++      dialog.setFileMode(QFileDialog::ExistingFile);
++      dialog.setAcceptMode(QFileDialog::AcceptOpen);
++      break;
++    case SelectFileDialogType::kOpenMultiFile:
++      dialog.setFileMode(QFileDialog::ExistingFiles);
++      dialog.setAcceptMode(QFileDialog::AcceptOpen);
++      break;
++    case SelectFileDialogType::kSaveFile:
++      dialog.setFileMode(QFileDialog::AnyFile);
++      dialog.setAcceptMode(QFileDialog::AcceptSave);
++      dialog.setOption(QFileDialog::DontConfirmOverwrite, false);
++      break;
++    case SelectFileDialogType::kFolder:
++    case SelectFileDialogType::kUploadFolder:
++      dialog.setFileMode(QFileDialog::Directory);
++      dialog.setOption(QFileDialog::ShowDirsOnly, true);
++      dialog.setAcceptMode(QFileDialog::AcceptOpen);
++      break;
++    case SelectFileDialogType::kExistingFolder:
++      dialog.setFileMode(QFileDialog::Directory);
++      dialog.setOption(QFileDialog::ShowDirsOnly, true);
++      dialog.setOption(QFileDialog::ReadOnly, true);
++      dialog.setAcceptMode(QFileDialog::AcceptOpen);
++      break;
++  }
++
++  if (!start_path.isEmpty()) {
++    // If the path looks like a file, set directory + selected file.
++    QFileInfo info(start_path);
++    if (info.isDir()) {
++      dialog.setDirectory(start_path);
++    } else {
++      dialog.setDirectory(info.absolutePath());
++      if (type == SelectFileDialogType::kSaveFile ||
++          type == SelectFileDialogType::kOpenFile) {
++        dialog.selectFile(info.fileName());
++      }
++    }
++  }
++
++  if (dialog.exec() != QDialog::Accepted) {
++    return result;
++  }
++
++  QStringList selected = dialog.selectedFiles();
++  if (selected.isEmpty()) {
++    return result;
++  }
++
++  result.accepted = true;
++  result.num_files = selected.size();
++  result.files =
++      static_cast<char**>(malloc(sizeof(char*) * result.num_files));
++  for (int i = 0; i < result.num_files; ++i) {
++    QByteArray utf8 = selected.at(i).toUtf8();
++    result.files[i] = strdup(utf8.constData());
++  }
++
++  // Map selected name filter back to a 1-based index among the filters we
++  // added (excluding the synthetic "All Files" entry when present).
++  if (!name_filters.isEmpty()) {
++    QString selected_filter = dialog.selectedNameFilter();
++    int idx = name_filters.indexOf(selected_filter);
++    if (idx >= 0) {
++      // If include_all_files added a trailing filter and that was chosen,
++      // report the last real filter (or 1) rather than inventing an index
++      // beyond Chromium's FileTypeInfo.
++      if (include_all_files && idx == name_filters.size() - 1 &&
++          num_filters > 0) {
++        result.filter_index = num_filters;
++      } else {
++        result.filter_index = idx + 1;
++      }
++    }
++  }
++
++  return result;
+ }
+ 
+ }  // namespace qt
+diff -Naur a/ui/qt/qt_shim.h b/ui/qt/qt_shim.h
+--- a/ui/qt/qt_shim.h	2026-07-26 14:46:56.391527478 +0200
++++ b/ui/qt/qt_shim.h	2026-07-26 14:46:56.396433228 +0200
+@@ -48,6 +48,15 @@
+   PrintingSettings GetPrinterSettings(
+       const String& printer_name) const override;
+   PrintDialogResult ShowPrintDialog(bool has_selection) override;
++  SelectFileResult ShowSelectFileDialog(
++      SelectFileDialogType type,
++      const String& title,
++      const String& default_path,
++      int default_filter_index,
++      int num_filters,
++      const String* filter_names,
++      const String* filter_patterns,
++      bool include_all_files) override;
+ 
+  private slots:
+   void FontChanged(const QFont& font);
+diff -Naur a/ui/qt/qt_ui.cc b/ui/qt/qt_ui.cc
+--- a/ui/qt/qt_ui.cc	2026-07-26 14:46:56.407150327 +0200
++++ b/ui/qt/qt_ui.cc	2026-07-26 14:46:56.411333138 +0200
+@@ -52,6 +52,7 @@
+ #include "ui/qt/native_theme_qt.h"
+ #include "ui/qt/os_settings_provider_qt.h"
+ #include "ui/qt/qt_interface.h"
++#include "ui/qt/select_file_dialog_linux_qt.h"
+ #include "ui/shell_dialogs/select_file_dialog.h"
+ #include "ui/shell_dialogs/select_file_policy.h"
+ #include "ui/views/controls/button/label_button_border.h"
+@@ -154,9 +155,18 @@
+   return *font_params_;
+ }
+ 
++DISABLE_CFI_VCALL
+ ui::SelectFileDialog* QtUi::CreateSelectFileDialog(
+     void* listener,
+     std::unique_ptr<ui::SelectFilePolicy> policy) const {
++  // Prefer a native Qt file dialog so Qt-based hosts (and CEF embeds without
++  // GTK) work when XDG Desktop Portal is unavailable. Only fall back to the
++  // GTK LinuxUi path if the Qt shim failed to load.
++  if (shim_) {
++    return new SelectFileDialogLinuxQt(
++        static_cast<ui::SelectFileDialog::Listener*>(listener),
++        std::move(policy), shim_.get());
++  }
+   return fallback_linux_ui_ ? fallback_linux_ui_->CreateSelectFileDialog(
+                                   listener, std::move(policy))
+                             : nullptr;
+diff -Naur a/ui/qt/select_file_dialog_linux_qt.cc b/ui/qt/select_file_dialog_linux_qt.cc
+--- a/ui/qt/select_file_dialog_linux_qt.cc	1970-01-01 01:00:00.000000000 +0100
++++ b/ui/qt/select_file_dialog_linux_qt.cc	2026-07-26 14:46:56.427347701 +0200
+@@ -0,0 +1,202 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ui/qt/select_file_dialog_linux_qt.h"
++
++#include <cstdlib>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "base/logging.h"
++#include "base/strings/string_util.h"
++#include "base/strings/utf_string_conversions.h"
++#include "ui/base/l10n/l10n_util.h"
++#include "ui/shell_dialogs/selected_file_info.h"
++#include "ui/strings/grit/ui_strings.h"
++
++namespace qt {
++namespace {
++
++SelectFileDialogType ToQtType(ui::SelectFileDialog::Type type) {
++  switch (type) {
++    case ui::SelectFileDialog::SELECT_OPEN_FILE:
++      return SelectFileDialogType::kOpenFile;
++    case ui::SelectFileDialog::SELECT_OPEN_MULTI_FILE:
++      return SelectFileDialogType::kOpenMultiFile;
++    case ui::SelectFileDialog::SELECT_SAVEAS_FILE:
++      return SelectFileDialogType::kSaveFile;
++    case ui::SelectFileDialog::SELECT_FOLDER:
++      return SelectFileDialogType::kFolder;
++    case ui::SelectFileDialog::SELECT_EXISTING_FOLDER:
++      return SelectFileDialogType::kExistingFolder;
++    case ui::SelectFileDialog::SELECT_UPLOAD_FOLDER:
++      return SelectFileDialogType::kUploadFolder;
++    case ui::SelectFileDialog::SELECT_NONE:
++      break;
++  }
++  NOTREACHED();
++}
++
++}  // namespace
++
++SelectFileDialogLinuxQt::SelectFileDialogLinuxQt(
++    Listener* listener,
++    std::unique_ptr<ui::SelectFilePolicy> policy,
++    QtInterface* shim)
++    : SelectFileDialogLinux(listener, std::move(policy)), shim_(shim) {
++  DCHECK(shim_);
++}
++
++SelectFileDialogLinuxQt::~SelectFileDialogLinuxQt() = default;
++
++bool SelectFileDialogLinuxQt::IsRunning(
++    gfx::NativeWindow /*parent_window*/) const {
++  return is_running_;
++}
++
++bool SelectFileDialogLinuxQt::HasMultipleFileTypeChoicesImpl() {
++  return file_types().extensions.size() > 1;
++}
++
++DISABLE_CFI_VCALL
++void SelectFileDialogLinuxQt::SelectFileImpl(
++    Type type,
++    const std::u16string& title,
++    const base::FilePath& default_path,
++    const FileTypeInfo* file_types,
++    int file_type_index,
++    const base::FilePath::StringType& /*default_extension*/,
++    gfx::NativeWindow /*owning_window*/,
++    const GURL* /*caller*/) {
++  set_type(type);
++  set_file_type_index(file_type_index);
++  if (file_types) {
++    set_file_types(*file_types);
++  }
++  // Use the stored FileTypeInfo after set_file_types(); avoid shadowing the
++  // file_types() accessor with the parameter name.
++  const FileTypeInfo& stored_types = this->file_types();
++
++  std::string title_string = base::UTF16ToUTF8(title);
++  if (title_string.empty()) {
++    switch (type) {
++      case SELECT_UPLOAD_FOLDER:
++        title_string =
++            l10n_util::GetStringUTF8(IDS_SELECT_UPLOAD_FOLDER_DIALOG_TITLE);
++        break;
++      case SELECT_FOLDER:
++      case SELECT_EXISTING_FOLDER:
++        title_string = l10n_util::GetStringUTF8(IDS_SELECT_FOLDER_DIALOG_TITLE);
++        break;
++      default:
++        break;
++    }
++  }
++
++  base::FilePath path = default_path;
++  if (path.empty()) {
++    if (type == SELECT_SAVEAS_FILE && !last_saved_path()->empty()) {
++      path = *last_saved_path();
++    } else if (!last_opened_path()->empty()) {
++      path = *last_opened_path();
++    }
++  }
++
++  // Build filter arrays for the Qt shim boundary.
++  const size_t num_filters = stored_types.extensions.size();
++  std::vector<String> filter_names;
++  std::vector<String> filter_patterns;
++  filter_names.reserve(num_filters);
++  filter_patterns.reserve(num_filters);
++
++  for (size_t i = 0; i < num_filters; ++i) {
++    std::string patterns;
++    for (const auto& ext : stored_types.extensions[i]) {
++      if (ext.empty()) {
++        continue;
++      }
++      if (!patterns.empty()) {
++        patterns.push_back(' ');
++      }
++      patterns.append("*.");
++      patterns.append(base::ToLowerASCII(ext));
++    }
++    if (patterns.empty()) {
++      // Keep a placeholder so indices stay aligned; empty patterns are
++      // skipped by the shim.
++      filter_names.emplace_back();
++      filter_patterns.emplace_back();
++      continue;
++    }
++
++    std::string name;
++    if (i < stored_types.extension_description_overrides.size()) {
++      name = base::UTF16ToUTF8(
++          stored_types.extension_description_overrides[i]);
++    }
++    filter_names.emplace_back(name.empty() ? nullptr : name.c_str());
++    filter_patterns.emplace_back(patterns.c_str());
++  }
++
++  is_running_ = true;
++  SelectFileResult result = shim_->ShowSelectFileDialog(
++      ToQtType(type), String(title_string.empty() ? nullptr : title_string.c_str()),
++      String(path.empty() ? nullptr : path.value().c_str()), file_type_index,
++      static_cast<int>(filter_names.size()),
++      filter_names.empty() ? nullptr : filter_names.data(),
++      filter_patterns.empty() ? nullptr : filter_patterns.data(),
++      stored_types.include_all_files);
++  is_running_ = false;
++
++  if (!result.accepted || result.num_files <= 0 || !result.files) {
++    if (result.files) {
++      for (int i = 0; i < result.num_files; ++i) {
++        free(result.files[i]);
++      }
++      free(result.files);
++    }
++    if (listener_) {
++      listener_->FileSelectionCanceled();
++    }
++    return;
++  }
++
++  std::vector<base::FilePath> paths;
++  paths.reserve(result.num_files);
++  for (int i = 0; i < result.num_files; ++i) {
++    if (result.files[i]) {
++      paths.emplace_back(result.files[i]);
++      free(result.files[i]);
++    }
++  }
++  free(result.files);
++
++  if (paths.empty()) {
++    if (listener_) {
++      listener_->FileSelectionCanceled();
++    }
++    return;
++  }
++
++  if (type == SELECT_SAVEAS_FILE) {
++    set_last_saved_path(paths[0].DirName());
++  } else {
++    set_last_opened_path(paths[0].DirName());
++  }
++
++  if (!listener_) {
++    return;
++  }
++
++  if (type == SELECT_OPEN_MULTI_FILE) {
++    listener_->MultiFilesSelected(
++        ui::FilePathListToSelectedFileInfoList(paths));
++  } else {
++    listener_->FileSelected(ui::SelectedFileInfo(paths[0]),
++                            result.filter_index);
++  }
++}
++
++}  // namespace qt
+diff -Naur a/ui/qt/select_file_dialog_linux_qt.h b/ui/qt/select_file_dialog_linux_qt.h
+--- a/ui/qt/select_file_dialog_linux_qt.h	1970-01-01 01:00:00.000000000 +0100
++++ b/ui/qt/select_file_dialog_linux_qt.h	2026-07-26 14:46:56.431166047 +0200
+@@ -0,0 +1,51 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef UI_QT_SELECT_FILE_DIALOG_LINUX_QT_H_
++#define UI_QT_SELECT_FILE_DIALOG_LINUX_QT_H_
++
++#include "base/memory/raw_ptr.h"
++#include "ui/qt/qt_interface.h"
++#include "ui/shell_dialogs/select_file_dialog_linux.h"
++
++namespace qt {
++
++// Implementation of SelectFileDialog that shows a Qt QFileDialog for choosing
++// a file or folder. Used when XDG Desktop Portal is unavailable and the Qt
++// Linux UI backend is active (so we do not need a GTK fallback).
++class SelectFileDialogLinuxQt : public ui::SelectFileDialogLinux {
++ public:
++  SelectFileDialogLinuxQt(Listener* listener,
++                          std::unique_ptr<ui::SelectFilePolicy> policy,
++                          QtInterface* shim);
++
++  SelectFileDialogLinuxQt(const SelectFileDialogLinuxQt&) = delete;
++  SelectFileDialogLinuxQt& operator=(const SelectFileDialogLinuxQt&) = delete;
++
++ protected:
++  ~SelectFileDialogLinuxQt() override;
++
++  // BaseShellDialog:
++  bool IsRunning(gfx::NativeWindow parent_window) const override;
++
++  // SelectFileDialog:
++  void SelectFileImpl(Type type,
++                      const std::u16string& title,
++                      const base::FilePath& default_path,
++                      const FileTypeInfo* file_types,
++                      int file_type_index,
++                      const base::FilePath::StringType& default_extension,
++                      gfx::NativeWindow owning_window,
++                      const GURL* caller) override;
++
++ private:
++  bool HasMultipleFileTypeChoicesImpl() override;
++
++  raw_ptr<QtInterface> shim_;
++  bool is_running_ = false;
++};
++
++}  // namespace qt
++
++#endif  // UI_QT_SELECT_FILE_DIALOG_LINUX_QT_H_

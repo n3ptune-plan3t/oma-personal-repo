@@ -1,0 +1,12 @@
+diff -up chromium-138.0.7204.92/build/rust/rust_bindgen_generator.gni.51~ chromium-138.0.7204.92/build/rust/rust_bindgen_generator.gni
+--- chromium-138.0.7204.92/build/rust/rust_bindgen_generator.gni.51~	2025-06-27 23:22:02.000000000 +0200
++++ chromium-138.0.7204.92/build/rust/rust_bindgen_generator.gni	2025-07-03 03:10:19.735183462 +0200
+@@ -226,7 +226,7 @@ template("rust_bindgen_generator") {
+     # make it behave consistently with our other command line flags and allows
+     # system headers to be found.
+     clang_resource_dir =
+-        rebase_path(clang_base_path + "/lib/clang/" + clang_version,
++        rebase_path(clang_base_path + "/lib64/clang/" + clang_version,
+                     root_build_dir)
+     args += [
+       "-resource-dir",

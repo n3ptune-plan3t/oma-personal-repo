@@ -1,0 +1,20 @@
+--- chromium-150.0.7871.114/skia/BUILD.gn.avx~	2026-07-13 03:36:01.502058159 +0200
++++ chromium-150.0.7871.114/skia/BUILD.gn	2026-07-13 03:36:01.502101580 +0200
+@@ -883,9 +883,15 @@
+   if (is_win) {
+     cflags = [ "/arch:AVX512" ]
+   } else {
++    # Prefer explicit -mavx512* over -march=x86-64-v4. Distro unbundle
++    # builds append $CFLAGS last; a later -march=znver1 fully overrides
++    # x86-64-v4 and drops AVX-512, while -mavx512f survives.
+     cflags = [
+-      "-march=x86-64-v4",
+-      "-mprefer-vector-width=512",
++      "-mavx512f",
++      "-mavx512dq",
++      "-mavx512cd",
++      "-mavx512bw",
++      "-mavx512vl",
+     ]
+   }
+ }

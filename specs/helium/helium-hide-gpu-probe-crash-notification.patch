@@ -1,0 +1,192 @@
+# Hide desktop/KDE crash notifications for expected GPU-process crashes.
+#
+# On some driver/hardware combinations the GPU process SIGSEGVs while probing
+# Vulkan (or GL). Chromium then restarts it without that backend and the
+# browser keeps working. That happens before the GPU sandbox makes the
+# process non-dumpable, so systemd-coredump + DrKonqi show a KDE
+# notification. Disable kernel core dumps for the GPU process only.
+# Also skip GPU-process Crashpad dumps in Helium's optional crash dialog.
+# Vulkan stays enabled so machines where it works still get it.
+
+diff -urN a/chrome/browser/crash_upload_list/BUILD.gn b/chrome/browser/crash_upload_list/BUILD.gn
+--- a/chrome/browser/crash_upload_list/BUILD.gn	2026-08-29 17:22:38.774459477 +0200
++++ b/chrome/browser/crash_upload_list/BUILD.gn	2026-08-29 17:22:38.774679230 +0200
+@@ -16,6 +16,8 @@
+     "//components/prefs",
+     "//components/upload_list",
+     "//third_party/crashpad/crashpad/client",
++    "//third_party/crashpad/crashpad/snapshot",
++    "//third_party/crashpad/crashpad/util",
+   ]
+ 
+   if (is_android) {
+diff -urN a/chrome/browser/crash_upload_list/helium_crash_reporting.cc b/chrome/browser/crash_upload_list/helium_crash_reporting.cc
+--- a/chrome/browser/crash_upload_list/helium_crash_reporting.cc	2026-08-29 17:22:38.774152672 +0200
++++ b/chrome/browser/crash_upload_list/helium_crash_reporting.cc	2026-08-29 17:22:38.774594919 +0200
+@@ -13,6 +13,9 @@
+ #include "chrome/common/pref_names.h"
+ #include "components/crash/core/app/crashpad.h"
+ #include "components/metrics/metrics_pref_names.h"
++#include "third_party/crashpad/crashpad/client/crash_report_database.h"
++#include "third_party/crashpad/crashpad/snapshot/minidump/process_snapshot_minidump.h"
++#include "third_party/crashpad/crashpad/util/file/file_reader.h"
+ #include "components/prefs/pref_change_registrar.h"
+ #include "components/prefs/pref_service.h"
+ 
+@@ -42,8 +45,60 @@
+   }
+ }
+ 
++std::string CrashReportProcessType(const std::string& local_id) {
++  crashpad::CrashReportDatabase* database =
++      crash_reporter::internal::GetCrashReportDatabase();
++  if (!database) {
++    return std::string();
++  }
++
++  crashpad::UUID uuid;
++  if (!uuid.InitializeFromString(local_id)) {
++    return std::string();
++  }
++
++  crashpad::CrashReportDatabase::Report report;
++  if (database->LookUpCrashReport(uuid, &report) !=
++      crashpad::CrashReportDatabase::kNoError) {
++    return std::string();
++  }
++
++  crashpad::FileReader reader;
++  if (!reader.Open(report.file_path)) {
++    return std::string();
++  }
++
++  crashpad::ProcessSnapshotMinidump snapshot;
++  if (!snapshot.Initialize(&reader)) {
++    return std::string();
++  }
++
++  const auto& annotations = snapshot.AnnotationsSimpleMap();
++  const auto it = annotations.find("ptype");
++  return it == annotations.end() ? std::string() : it->second;
++}
++
+ }  // namespace
+ 
++bool IsGpuProcessCrashReport(const std::string& local_id) {
++  return CrashReportProcessType(local_id) == "gpu-process";
++}
++
++void DiscardPendingGpuProcessCrashReports() {
++  std::vector<crash_reporter::Report> reports;
++  crash_reporter::GetReports(&reports);
++  for (const auto& report : reports) {
++    if (report.state != crash_reporter::ReportUploadState::Pending &&
++        report.state !=
++            crash_reporter::ReportUploadState::Pending_UserRequested) {
++      continue;
++    }
++    if (IsGpuProcessCrashReport(report.local_id)) {
++      crash_reporter::DeleteCrashReport(report.local_id);
++    }
++  }
++}
++
+ CrashReportingMode GetCrashReportingMode() {
+   PrefService* local_state = g_browser_process->local_state();
+   CHECK(local_state);
+@@ -102,6 +157,10 @@
+     return;
+   }
+ 
++  // Vulkan probes can SIGSEGV the GPU process on some drivers. Drop those
++  // dumps so startup does not ask the user about a crash that was not one.
++  DiscardPendingGpuProcessCrashReports();
++
+   const CrashReportingMode mode = GetCrashReportingMode();
+   switch (mode) {
+     case CrashReportingMode::kDisabled:
+diff -urN a/chrome/browser/crash_upload_list/helium_crash_reporting.h b/chrome/browser/crash_upload_list/helium_crash_reporting.h
+--- a/chrome/browser/crash_upload_list/helium_crash_reporting.h	2026-08-29 17:22:38.774298264 +0200
++++ b/chrome/browser/crash_upload_list/helium_crash_reporting.h	2026-08-29 17:22:38.774538788 +0200
+@@ -5,6 +5,8 @@
+ #ifndef CHROME_BROWSER_CRASH_UPLOAD_LIST_HELIUM_CRASH_REPORTING_H_
+ #define CHROME_BROWSER_CRASH_UPLOAD_LIST_HELIUM_CRASH_REPORTING_H_
+ 
++#include <string>
++
+ namespace helium {
+ 
+ enum class CrashReportingMode {
+@@ -28,6 +30,14 @@
+ // reporting is disabled by the user or policy.
+ void InitializeCrashReportingMode();
+ 
++// True when `local_id` is a GPU-process dump. Those are commonly written
++// during the Vulkan capability probe and are not a browser crash.
++bool IsGpuProcessCrashReport(const std::string& local_id);
++
++// Drop pending GPU-process dumps so the startup crash dialog does not
++// offer them. Real browser-process dumps are left alone.
++void DiscardPendingGpuProcessCrashReports();
++
+ // Disables consent, discards existing unrequested reports, stores `mode`, and
+ // then enables consent only when `mode` is automatic. Explicitly requested
+ // reports are also discarded when reporting is disabled by the user or policy.
+diff -urN a/chrome/browser/ui/startup/helium_crash_dialog_controller.cc b/chrome/browser/ui/startup/helium_crash_dialog_controller.cc
+--- a/chrome/browser/ui/startup/helium_crash_dialog_controller.cc	2026-08-29 17:22:38.774382535 +0200
++++ b/chrome/browser/ui/startup/helium_crash_dialog_controller.cc	2026-08-29 17:22:38.774643169 +0200
+@@ -152,6 +152,12 @@
+         !ReservedReportIds().insert(report.local_id).second) {
+       continue;
+     }
++    // GPU-process dumps from the Vulkan capability check are expected.
++    if (helium::IsGpuProcessCrashReport(report.local_id)) {
++      ReservedReportIds().erase(report.local_id);
++      crash_reporter::DeleteCrashReport(report.local_id);
++      continue;
++    }
+     report_ids.emplace_back(report.local_id);
+   }
+   if (report_ids.empty()) {
+--- a/content/gpu/gpu_main.cc
++++ b/content/gpu/gpu_main.cc
+@@ -13,6 +13,7 @@
+ #include "base/allocator/partition_alloc_support.h"
+ #include "base/byte_size.h"
+ #include "base/check.h"
++#include "base/logging.h"
+ #include "base/command_line.h"
+ #include "base/feature_list.h"
+ #include "base/files/scoped_file.h"
+@@ -117,6 +118,9 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#include <sys/prctl.h>
++#include <sys/resource.h>
++
+ #include "content/child/sandboxed_process_thread_type_handler.h"
+ #include "content/common/gpu_pre_sandbox_hook_linux.h"
+ #include "sandbox/policy/linux/sandbox_linux.h"
+@@ -235,6 +239,21 @@
+ int GpuMain(MainFunctionParams parameters) {
+   TRACE_EVENT("gpu,startup", "GpuMain");
+ 
++#if BUILDFLAG(IS_LINUX)
++  // Vulkan/GL capability checks can SIGSEGV the GPU process on some
++  // drivers. Chromium then restarts it without that backend and the
++  // browser keeps working. That crash happens before the GPU sandbox
++  // sets PR_SET_DUMPABLE=0, so systemd-coredump + DrKonqi would show a
++  // KDE notification. Disable kernel core dumps for this process only.
++  if (prctl(PR_SET_DUMPABLE, 0) != 0) {
++    PLOG(WARNING) << "prctl(PR_SET_DUMPABLE, 0)";
++  }
++  const struct rlimit core_limit = {0, 0};
++  if (setrlimit(RLIMIT_CORE, &core_limit) != 0) {
++    PLOG(WARNING) << "setrlimit(RLIMIT_CORE)";
++  }
++#endif
++
+   base::CurrentProcess::GetInstance().SetProcessType(
+       base::CurrentProcessType::PROCESS_GPU);
+ 

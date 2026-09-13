@@ -1,0 +1,15 @@
+diff -up chromium/media/filters/ffmpeg_glue.cc.omv~ chromium/media/filters/ffmpeg_glue.cc
+--- chromium/media/filters/ffmpeg_glue.cc.omv~	2026-08-13 00:00:00.000000000 +0000
++++ chromium/media/filters/ffmpeg_glue.cc	2026-08-13 00:00:00.000000000 +0000
+@@ -119,9 +119,8 @@ FFmpegGlue::FFmpegGlue(FFmpegURLProtocol
+   // Enable fast, but inaccurate seeks for MP3.
+   format_context_->flags |= AVFMT_FLAG_FAST_SEEK;
+ 
+-  // We don't allow H.264 parsing during demuxing since we have our own parser
+-  // and the ffmpeg one increases memory usage unnecessarily.
+-  format_context_->flags |= AVFMT_FLAG_NOH264PARSE;
++  // AVFMT_FLAG_NOH264PARSE is Chromium-private; system FFmpeg does not define
++  // it. Chromium still uses its own H.264 bitstream parsers.
+ 
+   // Ensures format parsing errors will bail out. From an audit on 11/2017, all
+   // instances were real failures. Solves bugs like http://crbug.com/710791.

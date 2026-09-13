@@ -1,0 +1,2267 @@
+diff -urN a/BUILD.gn b/BUILD.gn
+--- a/BUILD.gn	2026-07-30 22:09:36.000000000 +0200
++++ b/BUILD.gn	2026-08-02 00:50:47.769538159 +0200
+@@ -339,6 +339,9 @@
+ 
+   if (!is_linux || ozone_platform_x11) {
+     deps += [ ":cefclient" ]
++    if (is_linux) {
++      deps += [ ":cefclient_qt" ]
++    }
+   }
+ }
+ 
+@@ -430,6 +433,10 @@
+     "libcef/features:config",
+     "//build/config:precompiled_headers",
+   ]
++
++  libs = [
++    "z",
++  ]
+ }
+ 
+ # Executable target that provides test coverage for libcef_static_unittested
+@@ -1288,6 +1295,27 @@
+   }
+ }
+ 
++# On Linux, host applications (Qt, GTK apps, boost, …) use libstdc++. The
++# shipped libcef_dll_wrapper.a and sample apps that link it must therefore
++# also use libstdc++, while libcef.so keeps Chromium's private libc++.
++# Mirrors //ui/qt's approach of dropping //build/config/compiler:runtime_library.
++if (is_linux) {
++  config("cef_host_libstdcxx") {
++    if (is_clang) {
++      # libstdc++ headers are incompatible with -fcomplete-member-pointers.
++      cflags = [ "-fno-complete-member-pointers" ]
++      # Explicitly select the system GNU C++ library (not Chromium's libc++).
++      cflags_cc = [ "-stdlib=libstdc++" ]
++      ldflags = [ "-stdlib=libstdc++" ]
++    }
++    libs = [ "stdc++" ]
++    configs = [
++      "//build/config/linux:runtime_library",
++      "//build/config/posix:runtime_library",
++    ]
++  }
++}
++
+ # libcef_dll_wrapper target.
+ static_library("libcef_dll_wrapper") {
+   sources = includes_common +
+@@ -1320,6 +1348,36 @@
+ 
+   # Disable clang modules for this target (see issue #3611).
+   use_libcxx_modules = false
++
++  if (is_linux) {
++    # Compile against system libstdc++ so embedders (Qt, etc.) can link this
++    # archive without mixing C++ standard libraries.
++    configs -= [ "//build/config/compiler:runtime_library" ]
++    configs += [ ":cef_host_libstdcxx" ]
++  }
++}
++
++# In-tree-only twin of libcef_dll_wrapper that keeps Chromium's custom libc++.
++# Used by ceftests (which links Chromium's gtest/gmock built with libc++).
++# Not installed; the shipped archive is :libcef_dll_wrapper (libstdc++).
++if (is_linux) {
++  static_library("libcef_dll_wrapper_libcxx") {
++    sources = includes_common +
++              gypi_paths.autogen_cpp_includes +
++              gypi_paths2.includes_capi +
++              gypi_paths.autogen_capi_includes +
++              gypi_paths2.includes_wrapper +
++              gypi_paths2.libcef_dll_wrapper_sources_base +
++              gypi_paths2.libcef_dll_wrapper_sources_common +
++              gypi_paths.autogen_client_side
++
++    defines = [ "WRAPPING_CEF_SHARED" ]
++    configs += [ ":libcef_dll_wrapper_config" ]
++    public_configs = [ ":libcef_dll_wrapper_config" ]
++    deps = [ ":cef_make_headers" ]
++    use_libcxx_modules = false
++    visibility = [ ":*" ]
++  }
+ }
+ 
+ # Distribution variant of libcef_dll_wrapper for client DLLs loaded by
+@@ -2611,8 +2669,14 @@
+ 
+       deps += [
+         ":copy_cefclient_files",
++        "//build/config:common_deps_without_libcxx",
+       ]
+ 
++      # Same STL as libcef_dll_wrapper (system libstdc++).
++      no_default_deps = true
++      configs -= [ "//build/config/compiler:runtime_library" ]
++      configs += [ ":cef_host_libstdcxx" ]
++
+       libs = [
+         "GL",
+         "X11",
+@@ -2635,6 +2699,73 @@
+     }
+   }
+ 
++
++  # Qt-based cefclient sample (Linux). Demonstrates embedding CEF in a Qt
++  # application, parallel to the GTK cefclient target above.
++  if (is_linux) {
++    pkg_config("qt6_widgets") {
++      packages = [
++        "Qt6Core",
++        "Qt6Gui",
++        "Qt6Widgets",
++        "Qt6PrintSupport",
++      ]
++    }
++
++    executable("cefclient_qt") {
++      testonly = true
++
++      sources = includes_common +
++                gypi_paths2.includes_wrapper +
++                gypi_paths2.shared_sources_browser +
++                gypi_paths2.shared_sources_common +
++                gypi_paths2.shared_sources_renderer +
++                gypi_paths2.cefclient_sources_browser +
++                gypi_paths2.cefclient_sources_common +
++                gypi_paths2.cefclient_sources_renderer +
++                includes_linux +
++                gypi_paths2.shared_sources_linux +
++                gypi_paths2.cefclient_sources_linux_qt
++
++      deps = [
++        ":libcef",
++        ":libcef_dll_wrapper",
++        ":copy_cefclient_files",
++        # Avoid pulling Chromium's private libc++ into the link (see
++        # :cef_host_libstdcxx). Still need the non-libcxx common deps.
++        "//build/config:common_deps_without_libcxx",
++      ]
++
++      defines = [
++        "CEF_USE_SANDBOX",
++        "CEF_USE_QT",
++      ]
++
++      use_libcxx_modules = false
++
++      # Match system Qt / libstdc++; do not use Chromium's custom libc++.
++      no_default_deps = true
++      configs -= [ "//build/config/compiler:runtime_library" ]
++      configs += [
++        ":cef_host_libstdcxx",
++        ":qt6_widgets",
++      ]
++      # shared external-pump sources use GLib.
++      if (!use_sysroot) {
++        configs += [ ":glib" ]
++      }
++
++      libs = [
++        "GL",
++        "X11",
++      ]
++
++      if (!is_component_build) {
++        configs += [ "//build/config/gcc:rpath_for_built_shared_libraries" ]
++      }
++    }
++  }
++
+   if (is_win) {
+     # Like the "cefclient" executable target, but building a DLL to be loaded by
+     # bootstrap.exe.
+@@ -2765,6 +2896,11 @@
+       sources += includes_linux +
+                  gypi_paths2.cefsimple_sources_linux
+ 
++      deps += [ "//build/config:common_deps_without_libcxx" ]
++      no_default_deps = true
++      configs -= [ "//build/config/compiler:runtime_library" ]
++      configs += [ ":cef_host_libstdcxx" ]
++
+       if (ozone_platform_x11) {
+         libs = [
+           "X11",
+@@ -3019,6 +3155,13 @@
+       # Set rpath to find our own libfreetype even in a non-component build.
+       configs += [ "//build/config/gcc:rpath_for_built_shared_libraries" ]
+     }
++
++    # ceftests links Chromium gtest/gmock (libc++). On Linux the shipped
++    # libcef_dll_wrapper uses system libstdc++, so use a libc++-built twin.
++    if (is_linux) {
++      deps -= [ ":libcef_dll_wrapper" ]
++      deps += [ ":libcef_dll_wrapper_libcxx" ]
++    }
+   }
+ 
+   if (is_win) {
+diff -urN a/cef_paths2.gypi b/cef_paths2.gypi
+--- a/cef_paths2.gypi	2026-07-30 22:09:36.000000000 +0200
++++ b/cef_paths2.gypi	2026-08-02 00:50:47.679035625 +0200
+@@ -462,6 +462,26 @@
+       'tests/cefclient/browser/window_test_runner_gtk.h',
+       'tests/cefclient/cefclient_gtk.cc',
+     ],
++    # Qt toolkit sample (built as the separate cefclient_qt target).
++    'cefclient_sources_linux_qt': [
++      'tests/cefclient/browser/browser_window_std_qt.cc',
++      'tests/cefclient/browser/browser_window_std_qt.h',
++      'tests/cefclient/browser/dialog_handler_qt.cc',
++      'tests/cefclient/browser/dialog_handler_qt.h',
++      'tests/cefclient/browser/main_context_impl_posix.cc',
++      'tests/cefclient/browser/main_message_loop_multithreaded_qt.cc',
++      'tests/cefclient/browser/main_message_loop_multithreaded_qt.h',
++      'tests/cefclient/browser/print_handler_qt.cc',
++      'tests/cefclient/browser/print_handler_qt.h',
++      'tests/cefclient/browser/resource_util_linux.cc',
++      'tests/cefclient/browser/root_window_qt.cc',
++      'tests/cefclient/browser/root_window_qt.h',
++      'tests/cefclient/browser/temp_window_x11.cc',
++      'tests/cefclient/browser/temp_window_x11.h',
++      'tests/cefclient/browser/window_test_runner_qt.cc',
++      'tests/cefclient/browser/window_test_runner_qt.h',
++      'tests/cefclient/cefclient_qt.cc',
++    ],
+     'cefsimple_sources_common': [
+       'tests/cefsimple/simple_app.cc',
+       'tests/cefsimple/simple_app.h',
+diff -urN a/tests/cefclient/browser/browser_window_std_qt.cc b/tests/cefclient/browser/browser_window_std_qt.cc
+--- a/tests/cefclient/browser/browser_window_std_qt.cc	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/browser/browser_window_std_qt.cc	2026-08-02 00:50:47.683041844 +0200
+@@ -0,0 +1,189 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#include "tests/cefclient/browser/browser_window_std_qt.h"
++
++#include <X11/Xlib.h>
++
++// X11 macros collide with Qt (e.g. Status vs QDataStream::Status).
++#undef Bool
++#undef CursorShape
++#undef Expose
++#undef FocusIn
++#undef FocusOut
++#undef FontChange
++#undef KeyPress
++#undef KeyRelease
++#undef None
++#undef Status
++#undef Success
++#undef Unsorted
++#undef RootWindow
++
++
++#include <memory>
++
++#include <QWidget>
++
++#include "include/base/cef_logging.h"
++#include "tests/cefclient/browser/client_handler_std.h"
++#include "tests/shared/browser/main_message_loop.h"
++
++namespace client {
++namespace {
++
++::Window GetXWindowForWidget(QWidget* widget) {
++  DCHECK(widget);
++  // Ensure a native window exists before querying winId().
++  widget->setAttribute(Qt::WA_NativeWindow, true);
++  widget->winId();
++  ::Window xwindow = static_cast<::Window>(widget->winId());
++  DCHECK(xwindow);
++  return xwindow;
++}
++
++void SetXWindowVisible(XDisplay* xdisplay, ::Window xwindow, bool visible) {
++  CHECK(xdisplay != 0);
++  const char* kAtoms[] = {"_NET_WM_STATE", "ATOM", "_NET_WM_STATE_HIDDEN"};
++  Atom atoms[3];
++  int result =
++      XInternAtoms(xdisplay, const_cast<char**>(kAtoms), 3, false, atoms);
++  if (!result) {
++    NOTREACHED();
++  }
++
++  if (!visible) {
++    auto data = std::make_unique<Atom[]>(1);
++    data[0] = atoms[2];
++    XChangeProperty(xdisplay, xwindow, atoms[0], atoms[1], 32, PropModeReplace,
++                    reinterpret_cast<const unsigned char*>(data.get()), 1);
++  } else {
++    XChangeProperty(xdisplay, xwindow, atoms[0], atoms[1], 32, PropModeReplace,
++                    nullptr, 0);
++  }
++}
++
++void SetXWindowBounds(XDisplay* xdisplay,
++                      ::Window xwindow,
++                      int x,
++                      int y,
++                      size_t width,
++                      size_t height) {
++  CHECK(xdisplay != 0);
++  XWindowChanges changes = {0};
++  changes.x = x;
++  changes.y = y;
++  changes.width = static_cast<int>(width);
++  changes.height = static_cast<int>(height);
++  XConfigureWindow(xdisplay, xwindow, CWX | CWY | CWHeight | CWWidth, &changes);
++}
++
++}  // namespace
++
++BrowserWindowStdQt::BrowserWindowStdQt(Delegate* delegate,
++                                       bool with_controls,
++                                       const std::string& startup_url)
++    : BrowserWindow(delegate) {
++  client_handler_ = new ClientHandlerStd(this, with_controls, startup_url);
++}
++
++void BrowserWindowStdQt::set_xdisplay(XDisplay* xdisplay) {
++  REQUIRE_MAIN_THREAD();
++  DCHECK(!xdisplay_);
++  xdisplay_ = xdisplay;
++}
++
++void BrowserWindowStdQt::CreateBrowser(
++    ClientWindowHandle parent_handle,
++    const CefRect& rect,
++    const CefBrowserSettings& settings,
++    CefRefPtr<CefDictionaryValue> extra_info,
++    CefRefPtr<CefRequestContext> request_context) {
++  REQUIRE_MAIN_THREAD();
++
++  CefWindowInfo window_info;
++  window_info.SetAsChild(GetXWindowForWidget(parent_handle), rect);
++
++  if (delegate_->UseAlloyStyle()) {
++    window_info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
++  }
++
++  CefBrowserHost::CreateBrowser(window_info, client_handler_,
++                                client_handler_->startup_url(), settings,
++                                extra_info, request_context);
++}
++
++void BrowserWindowStdQt::GetPopupConfig(CefWindowHandle temp_handle,
++                                        CefWindowInfo& windowInfo,
++                                        CefRefPtr<CefClient>& client,
++                                        CefBrowserSettings& settings) {
++  CEF_REQUIRE_UI_THREAD();
++
++  windowInfo.SetAsChild(temp_handle, CefRect());
++  if (delegate_->UseAlloyStyle()) {
++    windowInfo.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
++  }
++  client = client_handler_;
++}
++
++void BrowserWindowStdQt::ShowPopup(ClientWindowHandle parent_handle,
++                                   int x,
++                                   int y,
++                                   size_t width,
++                                   size_t height) {
++  REQUIRE_MAIN_THREAD();
++
++  if (browser_) {
++    ::Window parent_xwindow = GetXWindowForWidget(parent_handle);
++    CHECK(xdisplay_ != 0);
++    ::Window xwindow = browser_->GetHost()->GetWindowHandle();
++    DCHECK(xwindow);
++
++    XReparentWindow(xdisplay_, xwindow, parent_xwindow, x, y);
++    SetXWindowBounds(xdisplay_, xwindow, x, y, width, height);
++    SetXWindowVisible(xdisplay_, xwindow, true);
++  }
++}
++
++void BrowserWindowStdQt::Show() {
++  REQUIRE_MAIN_THREAD();
++  if (browser_) {
++    ::Window xwindow = browser_->GetHost()->GetWindowHandle();
++    DCHECK(xwindow);
++    SetXWindowVisible(xdisplay_, xwindow, true);
++  }
++}
++
++void BrowserWindowStdQt::Hide() {
++  REQUIRE_MAIN_THREAD();
++  if (browser_) {
++    ::Window xwindow = browser_->GetHost()->GetWindowHandle();
++    DCHECK(xwindow);
++    SetXWindowVisible(xdisplay_, xwindow, false);
++  }
++}
++
++void BrowserWindowStdQt::SetBounds(int x, int y, size_t width, size_t height) {
++  REQUIRE_MAIN_THREAD();
++  if (xdisplay_ && browser_) {
++    ::Window xwindow = browser_->GetHost()->GetWindowHandle();
++    DCHECK(xwindow);
++    SetXWindowBounds(xdisplay_, xwindow, x, y, width, height);
++  }
++}
++
++void BrowserWindowStdQt::SetFocus(bool focus) {
++  REQUIRE_MAIN_THREAD();
++  if (browser_) {
++    browser_->GetHost()->SetFocus(focus);
++  }
++}
++
++ClientWindowHandle BrowserWindowStdQt::GetWindowHandle() const {
++  REQUIRE_MAIN_THREAD();
++  NOTREACHED();
++  return nullptr;
++}
++
++}  // namespace client
+diff -urN a/tests/cefclient/browser/browser_window_std_qt.h b/tests/cefclient/browser/browser_window_std_qt.h
+--- a/tests/cefclient/browser/browser_window_std_qt.h	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/browser/browser_window_std_qt.h	2026-08-02 00:50:47.687055273 +0200
+@@ -0,0 +1,52 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#ifndef CEF_TESTS_CEFCLIENT_BROWSER_BROWSER_WINDOW_STD_QT_H_
++#define CEF_TESTS_CEFCLIENT_BROWSER_BROWSER_WINDOW_STD_QT_H_
++#pragma once
++
++#include "tests/cefclient/browser/browser_window.h"
++
++namespace client {
++
++// Represents a native child window hosting a single windowed browser instance
++// inside a Qt host widget (X11 window id from QWidget::winId()).
++class BrowserWindowStdQt : public BrowserWindow {
++ public:
++  BrowserWindowStdQt(Delegate* delegate,
++                     bool with_controls,
++                     const std::string& startup_url);
++
++  BrowserWindowStdQt(const BrowserWindowStdQt&) = delete;
++  BrowserWindowStdQt& operator=(const BrowserWindowStdQt&) = delete;
++
++  void set_xdisplay(XDisplay* xdisplay);
++
++  void CreateBrowser(ClientWindowHandle parent_handle,
++                     const CefRect& rect,
++                     const CefBrowserSettings& settings,
++                     CefRefPtr<CefDictionaryValue> extra_info,
++                     CefRefPtr<CefRequestContext> request_context) override;
++  void GetPopupConfig(CefWindowHandle temp_handle,
++                      CefWindowInfo& windowInfo,
++                      CefRefPtr<CefClient>& client,
++                      CefBrowserSettings& settings) override;
++  void ShowPopup(ClientWindowHandle parent_handle,
++                 int x,
++                 int y,
++                 size_t width,
++                 size_t height) override;
++  void Show() override;
++  void Hide() override;
++  void SetBounds(int x, int y, size_t width, size_t height) override;
++  void SetFocus(bool focus) override;
++  ClientWindowHandle GetWindowHandle() const override;
++
++ private:
++  XDisplay* xdisplay_ = nullptr;
++};
++
++}  // namespace client
++
++#endif  // CEF_TESTS_CEFCLIENT_BROWSER_BROWSER_WINDOW_STD_QT_H_
+diff -urN a/tests/cefclient/browser/client_handler.cc b/tests/cefclient/browser/client_handler.cc
+--- a/tests/cefclient/browser/client_handler.cc	2026-07-30 22:09:36.000000000 +0200
++++ b/tests/cefclient/browser/client_handler.cc	2026-08-02 00:50:47.690878721 +0200
+@@ -531,18 +531,18 @@
+       command_line->HasSwitch(switches::kFilterChromeCommands);
+ 
+ #if defined(OS_LINUX)
+-  // Optionally use the client-provided GTK dialogs.
++  // Optionally use the client-provided toolkit dialogs (GTK or Qt).
+   const bool use_client_dialogs =
+       command_line->HasSwitch(switches::kUseClientDialogs);
+ 
+-  // Determine if the client-provided GTK dialogs can/should be used.
++  // Determine if the client-provided dialogs can/should be used.
+   bool require_client_dialogs = false;
+   bool support_client_dialogs = true;
+ 
+   if (command_line->HasSwitch(switches::kMultiThreadedMessageLoop)) {
+-    // Default/internal GTK dialogs are not supported in combination with
+-    // multi-threaded-message-loop because Chromium doesn't support GDK threads.
+-    // This does not apply to the JS dialogs which use Views instead of GTK.
++    // Default/internal toolkit dialogs are not supported in combination with
++    // multi-threaded-message-loop because Chromium doesn't support toolkit
++    // threads on that path.
+     if (!use_client_dialogs) {
+       LOG(WARNING) << "Client dialogs must be used in combination with "
+                       "multi-threaded-message-loop.";
+@@ -551,9 +551,8 @@
+   }
+ 
+   if (use_views_) {
+-    // Client-provided GTK dialogs cannot be used in combination with Views
+-    // because the implementation of ClientDialogHandlerGtk requires a top-level
+-    // GtkWindow.
++    // Client-provided toolkit dialogs cannot be used in combination with Views
++    // because they require a top-level native toolkit window.
+     if (use_client_dialogs) {
+       LOG(ERROR) << "Client dialogs cannot be used in combination with Views.";
+     }
+@@ -561,6 +560,16 @@
+   }
+ 
+   if (support_client_dialogs) {
++#if defined(CEF_USE_QT)
++    if (use_client_dialogs) {
++      js_dialog_handler_ = new ClientDialogHandlerQt();
++    }
++    if (use_client_dialogs || require_client_dialogs) {
++      file_dialog_handler_ = js_dialog_handler_ ? js_dialog_handler_
++                                                : new ClientDialogHandlerQt();
++      print_handler_ = new ClientPrintHandlerQt();
++    }
++#else
+     if (use_client_dialogs) {
+       js_dialog_handler_ = new ClientDialogHandlerGtk();
+     }
+@@ -569,6 +578,7 @@
+                                                 : new ClientDialogHandlerGtk();
+       print_handler_ = new ClientPrintHandlerGtk();
+     }
++#endif
+   }
+ #endif  // defined(OS_LINUX)
+ }
+diff -urN a/tests/cefclient/browser/client_handler.h b/tests/cefclient/browser/client_handler.h
+--- a/tests/cefclient/browser/client_handler.h	2026-07-30 22:09:36.000000000 +0200
++++ b/tests/cefclient/browser/client_handler.h	2026-08-02 00:50:47.694751848 +0200
+@@ -16,9 +16,14 @@
+ #include "tests/cefclient/browser/test_runner.h"
+ 
+ #if defined(OS_LINUX)
++#if defined(CEF_USE_QT)
++#include "tests/cefclient/browser/dialog_handler_qt.h"
++#include "tests/cefclient/browser/print_handler_qt.h"
++#else
+ #include "tests/cefclient/browser/dialog_handler_gtk.h"
+ #include "tests/cefclient/browser/print_handler_gtk.h"
+ #endif
++#endif
+ 
+ namespace client {
+ 
+@@ -407,11 +412,18 @@
+   bool download_favicon_images_ = false;
+ 
+ #if defined(OS_LINUX)
++#if defined(CEF_USE_QT)
++  // Custom dialog handlers for Qt.
++  CefRefPtr<ClientDialogHandlerQt> file_dialog_handler_;
++  CefRefPtr<ClientDialogHandlerQt> js_dialog_handler_;
++  CefRefPtr<ClientPrintHandlerQt> print_handler_;
++#else
+   // Custom dialog handlers for GTK.
+   CefRefPtr<ClientDialogHandlerGtk> file_dialog_handler_;
+   CefRefPtr<ClientDialogHandlerGtk> js_dialog_handler_;
+   CefRefPtr<ClientPrintHandlerGtk> print_handler_;
+ #endif
++#endif
+ 
+   // Safe to access from any thread during browser lifetime.
+   Delegate* delegate_;
+diff -urN a/tests/cefclient/browser/client_types.h b/tests/cefclient/browser/client_types.h
+--- a/tests/cefclient/browser/client_types.h	2026-07-30 22:09:36.000000000 +0200
++++ b/tests/cefclient/browser/client_types.h	2026-08-02 00:50:47.698659127 +0200
+@@ -9,10 +9,16 @@
+ #include "include/cef_base.h"
+ 
+ #if defined(OS_LINUX)
++#if defined(CEF_USE_QT)
++class QWidget;
++// Qt sample uses QWidget* as the top-level host handle.
++#define ClientWindowHandle QWidget*
++#else
+ #include <gtk/gtk.h>
+ 
+ // The Linux client uses GTK instead of the underlying platform type (X11).
+ #define ClientWindowHandle GtkWidget*
++#endif
+ #else
+ #define ClientWindowHandle CefWindowHandle
+ #endif
+diff -urN a/tests/cefclient/browser/dialog_handler_qt.cc b/tests/cefclient/browser/dialog_handler_qt.cc
+--- a/tests/cefclient/browser/dialog_handler_qt.cc	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/browser/dialog_handler_qt.cc	2026-08-02 00:50:47.703083639 +0200
+@@ -0,0 +1,254 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#include "tests/cefclient/browser/dialog_handler_qt.h"
++
++#include <QFileDialog>
++#include <QInputDialog>
++#include <QMessageBox>
++#include <QString>
++#include <QWidget>
++
++#include "include/base/cef_callback.h"
++#include "include/base/cef_logging.h"
++#include "include/cef_parser.h"
++#include "include/wrapper/cef_helpers.h"
++#include "tests/cefclient/browser/root_window.h"
++#include "tests/shared/browser/main_message_loop.h"
++#include "tests/shared/common/string_util.h"
++
++namespace client {
++namespace {
++
++QWidget* GetParentWidget(CefRefPtr<CefBrowser> browser) {
++  REQUIRE_MAIN_THREAD();
++  scoped_refptr<RootWindow> root_window =
++      RootWindow::GetForBrowser(browser->GetIdentifier());
++  if (root_window) {
++    return root_window->GetWindowHandle();
++  }
++  return nullptr;
++}
++
++QStringList BuildNameFilters(const std::vector<CefString>& accept_filters,
++                             const std::vector<CefString>& accept_extensions,
++                             const std::vector<CefString>& accept_descriptions) {
++  QStringList filters;
++  for (size_t j = 0; j < accept_filters.size(); ++j) {
++    const std::string& filter = accept_filters[j];
++    if (filter.empty()) {
++      continue;
++    }
++
++    std::vector<std::string> extensions =
++        AsciiStrSplit(accept_extensions[j], ';');
++    std::string description = accept_descriptions[j];
++
++    if (extensions.empty()) {
++      std::vector<CefString> ext;
++      CefGetExtensionsForMimeType(filter, ext);
++      for (size_t x = 0; x < ext.size(); ++x) {
++        extensions.push_back("." + ext[x].ToString());
++      }
++    }
++    if (extensions.empty()) {
++      continue;
++    }
++
++    QString patterns;
++    for (size_t x = 0; x < extensions.size(); ++x) {
++      if (x != 0) {
++        patterns += QLatin1Char(' ');
++      }
++      patterns += QLatin1Char('*');
++      patterns += QString::fromStdString(extensions[x]);
++    }
++
++    QString name = QString::fromStdString(description);
++    if (name.isEmpty()) {
++      name = patterns;
++    } else {
++      name = name + QStringLiteral(" (") + patterns + QLatin1Char(')');
++    }
++    filters << name;
++  }
++  if (!filters.isEmpty()) {
++    filters << QStringLiteral("All Files (*)");
++  }
++  return filters;
++}
++
++}  // namespace
++
++ClientDialogHandlerQt::ClientDialogHandlerQt() = default;
++
++bool ClientDialogHandlerQt::OnFileDialog(
++    CefRefPtr<CefBrowser> browser,
++    FileDialogMode mode,
++    const CefString& title,
++    const CefString& default_file_path,
++    const std::vector<CefString>& accept_filters,
++    const std::vector<CefString>& accept_extensions,
++    const std::vector<CefString>& accept_descriptions,
++    CefRefPtr<CefFileDialogCallback> callback) {
++  CEF_REQUIRE_UI_THREAD();
++
++  // Run on the main/UI thread that owns Qt widgets.
++  if (!CURRENTLY_ON_MAIN_THREAD()) {
++    MAIN_POST_CLOSURE(base::BindOnce(
++        [](CefRefPtr<ClientDialogHandlerQt> self,
++           CefRefPtr<CefBrowser> browser, FileDialogMode mode,
++           CefString title, CefString default_file_path,
++           std::vector<CefString> accept_filters,
++           std::vector<CefString> accept_extensions,
++           std::vector<CefString> accept_descriptions,
++           CefRefPtr<CefFileDialogCallback> callback) {
++          self->OnFileDialog(browser, mode, title, default_file_path,
++                             accept_filters, accept_extensions,
++                             accept_descriptions, callback);
++        },
++        CefRefPtr<ClientDialogHandlerQt>(this), browser, mode, title,
++        default_file_path, accept_filters, accept_extensions,
++        accept_descriptions, callback));
++    return true;
++  }
++
++  QWidget* parent = GetParentWidget(browser);
++  QFileDialog dialog(parent);
++  if (!title.empty()) {
++    dialog.setWindowTitle(QString::fromStdString(title.ToString()));
++  }
++
++  const QStringList name_filters =
++      BuildNameFilters(accept_filters, accept_extensions, accept_descriptions);
++  if (!name_filters.isEmpty()) {
++    dialog.setNameFilters(name_filters);
++  }
++
++  const std::string default_path = default_file_path.ToString();
++  if (!default_path.empty()) {
++    dialog.selectFile(QString::fromStdString(default_path));
++  }
++
++  switch (mode) {
++    case FILE_DIALOG_OPEN:
++      dialog.setFileMode(QFileDialog::ExistingFile);
++      dialog.setAcceptMode(QFileDialog::AcceptOpen);
++      break;
++    case FILE_DIALOG_OPEN_MULTIPLE:
++      dialog.setFileMode(QFileDialog::ExistingFiles);
++      dialog.setAcceptMode(QFileDialog::AcceptOpen);
++      break;
++    case FILE_DIALOG_OPEN_FOLDER:
++      dialog.setFileMode(QFileDialog::Directory);
++      dialog.setOption(QFileDialog::ShowDirsOnly, true);
++      dialog.setAcceptMode(QFileDialog::AcceptOpen);
++      break;
++    case FILE_DIALOG_SAVE:
++      dialog.setFileMode(QFileDialog::AnyFile);
++      dialog.setAcceptMode(QFileDialog::AcceptSave);
++      break;
++    case FILE_DIALOG_NUM_VALUES:
++      break;
++  }
++
++  if (dialog.exec() != QDialog::Accepted) {
++    callback->Cancel();
++    return true;
++  }
++
++  std::vector<CefString> files;
++  for (const QString& path : dialog.selectedFiles()) {
++    files.push_back(path.toStdString());
++  }
++  callback->Continue(files);
++  return true;
++}
++
++bool ClientDialogHandlerQt::OnJSDialog(
++    CefRefPtr<CefBrowser> browser,
++    const CefString& /*origin_url*/,
++    JSDialogType dialog_type,
++    const CefString& message_text,
++    const CefString& default_prompt_text,
++    CefRefPtr<CefJSDialogCallback> callback,
++    bool& suppress_message) {
++  CEF_REQUIRE_UI_THREAD();
++  suppress_message = false;
++
++  if (!CURRENTLY_ON_MAIN_THREAD()) {
++    MAIN_POST_CLOSURE(base::BindOnce(
++        [](CefRefPtr<ClientDialogHandlerQt> self,
++           CefRefPtr<CefBrowser> browser, JSDialogType dialog_type,
++           CefString message_text, CefString default_prompt_text,
++           CefRefPtr<CefJSDialogCallback> callback) {
++          bool suppress = false;
++          self->OnJSDialog(browser, CefString(), dialog_type, message_text,
++                           default_prompt_text, callback, suppress);
++        },
++        CefRefPtr<ClientDialogHandlerQt>(this), browser, dialog_type,
++        message_text, default_prompt_text, callback));
++    return true;
++  }
++
++  QWidget* parent = GetParentWidget(browser);
++  const QString message = QString::fromStdString(message_text.ToString());
++
++  switch (dialog_type) {
++    case JSDIALOGTYPE_ALERT:
++      QMessageBox::information(parent, QStringLiteral("JavaScript Alert"),
++                               message);
++      callback->Continue(true, CefString());
++      break;
++    case JSDIALOGTYPE_CONFIRM: {
++      const auto ret = QMessageBox::question(
++          parent, QStringLiteral("JavaScript Confirm"), message);
++      callback->Continue(ret == QMessageBox::Yes, CefString());
++      break;
++    }
++    case JSDIALOGTYPE_PROMPT: {
++      bool ok = false;
++      const QString text = QInputDialog::getText(
++          parent, QStringLiteral("JavaScript Prompt"), message,
++          QLineEdit::Normal,
++          QString::fromStdString(default_prompt_text.ToString()), &ok);
++      callback->Continue(ok, text.toStdString());
++      break;
++    }
++  }
++  return true;
++}
++
++bool ClientDialogHandlerQt::OnBeforeUnloadDialog(
++    CefRefPtr<CefBrowser> browser,
++    const CefString& message_text,
++    bool /*is_reload*/,
++    CefRefPtr<CefJSDialogCallback> callback) {
++  CEF_REQUIRE_UI_THREAD();
++
++  if (!CURRENTLY_ON_MAIN_THREAD()) {
++    MAIN_POST_CLOSURE(base::BindOnce(
++        [](CefRefPtr<ClientDialogHandlerQt> self,
++           CefRefPtr<CefBrowser> browser, CefString message_text,
++           CefRefPtr<CefJSDialogCallback> callback) {
++          self->OnBeforeUnloadDialog(browser, message_text, false, callback);
++        },
++        CefRefPtr<ClientDialogHandlerQt>(this), browser, message_text,
++        callback));
++    return true;
++  }
++
++  QWidget* parent = GetParentWidget(browser);
++  const auto ret = QMessageBox::question(
++      parent, QStringLiteral("Leave site?"),
++      QString::fromStdString(message_text.ToString()));
++  callback->Continue(ret == QMessageBox::Yes, CefString());
++  return true;
++}
++
++void ClientDialogHandlerQt::OnResetDialogState(CefRefPtr<CefBrowser> browser) {
++  CEF_REQUIRE_UI_THREAD();
++}
++
++}  // namespace client
+diff -urN a/tests/cefclient/browser/dialog_handler_qt.h b/tests/cefclient/browser/dialog_handler_qt.h
+--- a/tests/cefclient/browser/dialog_handler_qt.h	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/browser/dialog_handler_qt.h	2026-08-02 00:50:47.706979798 +0200
+@@ -0,0 +1,51 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#ifndef CEF_TESTS_CEFCLIENT_BROWSER_DIALOG_HANDLER_QT_H_
++#define CEF_TESTS_CEFCLIENT_BROWSER_DIALOG_HANDLER_QT_H_
++#pragma once
++
++#include "include/cef_dialog_handler.h"
++#include "include/cef_jsdialog_handler.h"
++
++namespace client {
++
++// Qt-based file and JS dialogs for the cefclient_qt sample.
++class ClientDialogHandlerQt : public CefDialogHandler,
++                              public CefJSDialogHandler {
++ public:
++  ClientDialogHandlerQt();
++
++  ClientDialogHandlerQt(const ClientDialogHandlerQt&) = delete;
++  ClientDialogHandlerQt& operator=(const ClientDialogHandlerQt&) = delete;
++
++  bool OnFileDialog(CefRefPtr<CefBrowser> browser,
++                    FileDialogMode mode,
++                    const CefString& title,
++                    const CefString& default_file_path,
++                    const std::vector<CefString>& accept_filters,
++                    const std::vector<CefString>& accept_extensions,
++                    const std::vector<CefString>& accept_descriptions,
++                    CefRefPtr<CefFileDialogCallback> callback) override;
++
++  bool OnJSDialog(CefRefPtr<CefBrowser> browser,
++                  const CefString& origin_url,
++                  JSDialogType dialog_type,
++                  const CefString& message_text,
++                  const CefString& default_prompt_text,
++                  CefRefPtr<CefJSDialogCallback> callback,
++                  bool& suppress_message) override;
++  bool OnBeforeUnloadDialog(CefRefPtr<CefBrowser> browser,
++                            const CefString& message_text,
++                            bool is_reload,
++                            CefRefPtr<CefJSDialogCallback> callback) override;
++  void OnResetDialogState(CefRefPtr<CefBrowser> browser) override;
++
++ private:
++  IMPLEMENT_REFCOUNTING(ClientDialogHandlerQt);
++};
++
++}  // namespace client
++
++#endif  // CEF_TESTS_CEFCLIENT_BROWSER_DIALOG_HANDLER_QT_H_
+diff -urN a/tests/cefclient/browser/main_message_loop_multithreaded_qt.cc b/tests/cefclient/browser/main_message_loop_multithreaded_qt.cc
+--- a/tests/cefclient/browser/main_message_loop_multithreaded_qt.cc	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/browser/main_message_loop_multithreaded_qt.cc	2026-08-02 00:50:47.710290481 +0200
+@@ -0,0 +1,65 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#include "tests/cefclient/browser/main_message_loop_multithreaded_qt.h"
++
++#include <QApplication>
++#include <QTimer>
++
++#include "include/base/cef_logging.h"
++
++namespace client {
++
++MainMessageLoopMultithreadedQt::MainMessageLoopMultithreadedQt()
++    : thread_id_(base::PlatformThread::CurrentId()) {}
++
++MainMessageLoopMultithreadedQt::~MainMessageLoopMultithreadedQt() {
++  DCHECK(RunsTasksOnCurrentThread());
++  DCHECK(queued_tasks_.empty());
++}
++
++int MainMessageLoopMultithreadedQt::Run() {
++  DCHECK(RunsTasksOnCurrentThread());
++  running_ = true;
++
++  QTimer timer;
++  QObject::connect(&timer, &QTimer::timeout, &timer, [this]() { RunTasks(); });
++  timer.start(10);
++
++  const int result = qApp->exec();
++  running_ = false;
++  RunTasks();
++  return result;
++}
++
++void MainMessageLoopMultithreadedQt::Quit() {
++  qApp->quit();
++}
++
++void MainMessageLoopMultithreadedQt::PostTask(CefRefPtr<CefTask> task) {
++  base::AutoLock lock_scope(lock_);
++  queued_tasks_.push(task);
++}
++
++bool MainMessageLoopMultithreadedQt::RunsTasksOnCurrentThread() const {
++  return base::PlatformThread::CurrentId() == thread_id_;
++}
++
++void MainMessageLoopMultithreadedQt::RunTasks() {
++  DCHECK(RunsTasksOnCurrentThread());
++  for (;;) {
++    CefRefPtr<CefTask> task;
++    {
++      base::AutoLock lock_scope(lock_);
++      if (queued_tasks_.empty()) {
++        break;
++      }
++      task = queued_tasks_.front();
++      queued_tasks_.pop();
++    }
++    task->Execute();
++  }
++}
++
++}  // namespace client
+diff -urN a/tests/cefclient/browser/main_message_loop_multithreaded_qt.h b/tests/cefclient/browser/main_message_loop_multithreaded_qt.h
+--- a/tests/cefclient/browser/main_message_loop_multithreaded_qt.h	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/browser/main_message_loop_multithreaded_qt.h	2026-08-02 00:50:47.713847165 +0200
+@@ -0,0 +1,44 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#ifndef CEF_TESTS_CEFCLIENT_BROWSER_MAIN_MESSAGE_LOOP_MULTITHREADED_QT_H_
++#define CEF_TESTS_CEFCLIENT_BROWSER_MAIN_MESSAGE_LOOP_MULTITHREADED_QT_H_
++#pragma once
++
++#include <queue>
++
++#include "include/base/cef_lock.h"
++#include "include/base/cef_platform_thread.h"
++#include "tests/shared/browser/main_message_loop.h"
++
++namespace client {
++
++// Main message loop for multi-threaded mode using Qt's event loop.
++class MainMessageLoopMultithreadedQt : public MainMessageLoop {
++ public:
++  MainMessageLoopMultithreadedQt();
++  ~MainMessageLoopMultithreadedQt() override;
++
++  MainMessageLoopMultithreadedQt(const MainMessageLoopMultithreadedQt&) =
++      delete;
++  MainMessageLoopMultithreadedQt& operator=(
++      const MainMessageLoopMultithreadedQt&) = delete;
++
++  int Run() override;
++  void Quit() override;
++  void PostTask(CefRefPtr<CefTask> task) override;
++  bool RunsTasksOnCurrentThread() const override;
++
++ private:
++  void RunTasks();
++
++  base::PlatformThreadId thread_id_;
++  base::Lock lock_;
++  std::queue<CefRefPtr<CefTask>> queued_tasks_;
++  bool running_ = false;
++};
++
++}  // namespace client
++
++#endif  // CEF_TESTS_CEFCLIENT_BROWSER_MAIN_MESSAGE_LOOP_MULTITHREADED_QT_H_
+diff -urN a/tests/cefclient/browser/print_handler_qt.cc b/tests/cefclient/browser/print_handler_qt.cc
+--- a/tests/cefclient/browser/print_handler_qt.cc	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/browser/print_handler_qt.cc	2026-08-02 00:50:47.715306979 +0200
+@@ -0,0 +1,69 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#include "tests/cefclient/browser/print_handler_qt.h"
++
++#include <QPageLayout>
++#include <QPageSize>
++#include <QPrinter>
++
++#include "include/wrapper/cef_helpers.h"
++
++namespace client {
++
++ClientPrintHandlerQt::ClientPrintHandlerQt() = default;
++
++void ClientPrintHandlerQt::OnPrintStart(CefRefPtr<CefBrowser> /*browser*/) {}
++
++void ClientPrintHandlerQt::OnPrintSettings(
++    CefRefPtr<CefBrowser> /*browser*/,
++    CefRefPtr<CefPrintSettings> settings,
++    bool get_defaults) {
++  CEF_REQUIRE_UI_THREAD();
++  if (!get_defaults) {
++    return;
++  }
++  QPrinter printer;
++  const QPageSize size = printer.pageLayout().pageSize();
++  const QSizeF points = size.size(QPageSize::Point);
++  settings->SetOrientation(printer.pageLayout().orientation() ==
++                           QPageLayout::Landscape);
++  settings->SetDeviceName(printer.printerName().toStdString());
++  // Size is applied via GetPdfPaperSize for PDF path.
++  (void)points;
++}
++
++bool ClientPrintHandlerQt::OnPrintDialog(
++    CefRefPtr<CefBrowser> /*browser*/,
++    bool /*has_selection*/,
++    CefRefPtr<CefPrintDialogCallback> callback) {
++  CEF_REQUIRE_UI_THREAD();
++  // Let Chromium/CEF show the system (portal/Qt) print dialog instead.
++  callback->Cancel();
++  return false;
++}
++
++bool ClientPrintHandlerQt::OnPrintJob(
++    CefRefPtr<CefBrowser> /*browser*/,
++    const CefString& /*document_name*/,
++    const CefString& /*pdf_file_path*/,
++    CefRefPtr<CefPrintJobCallback> /*callback*/) {
++  CEF_REQUIRE_UI_THREAD();
++  return false;
++}
++
++void ClientPrintHandlerQt::OnPrintReset(CefRefPtr<CefBrowser> /*browser*/) {}
++
++CefSize ClientPrintHandlerQt::GetPdfPaperSize(
++    CefRefPtr<CefBrowser> /*browser*/,
++    int device_units_per_inch) {
++  CEF_REQUIRE_UI_THREAD();
++  QPrinter printer;
++  const QSizeF inches =
++      printer.pageLayout().pageSize().size(QPageSize::Inch);
++  return CefSize(static_cast<int>(inches.width() * device_units_per_inch),
++                 static_cast<int>(inches.height() * device_units_per_inch));
++}
++
++}  // namespace client
+diff -urN a/tests/cefclient/browser/print_handler_qt.h b/tests/cefclient/browser/print_handler_qt.h
+--- a/tests/cefclient/browser/print_handler_qt.h	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/browser/print_handler_qt.h	2026-08-02 00:50:47.716856625 +0200
+@@ -0,0 +1,43 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#ifndef CEF_TESTS_CEFCLIENT_BROWSER_PRINT_HANDLER_QT_H_
++#define CEF_TESTS_CEFCLIENT_BROWSER_PRINT_HANDLER_QT_H_
++#pragma once
++
++#include "include/cef_print_handler.h"
++
++namespace client {
++
++// Minimal Qt print handler for the cefclient_qt sample. Defers most work to
++// Chromium's print pipeline; provides PDF paper size defaults via QPrinter.
++class ClientPrintHandlerQt : public CefPrintHandler {
++ public:
++  ClientPrintHandlerQt();
++
++  ClientPrintHandlerQt(const ClientPrintHandlerQt&) = delete;
++  ClientPrintHandlerQt& operator=(const ClientPrintHandlerQt&) = delete;
++
++  void OnPrintStart(CefRefPtr<CefBrowser> browser) override;
++  void OnPrintSettings(CefRefPtr<CefBrowser> browser,
++                       CefRefPtr<CefPrintSettings> settings,
++                       bool get_defaults) override;
++  bool OnPrintDialog(CefRefPtr<CefBrowser> browser,
++                     bool has_selection,
++                     CefRefPtr<CefPrintDialogCallback> callback) override;
++  bool OnPrintJob(CefRefPtr<CefBrowser> browser,
++                  const CefString& document_name,
++                  const CefString& pdf_file_path,
++                  CefRefPtr<CefPrintJobCallback> callback) override;
++  void OnPrintReset(CefRefPtr<CefBrowser> browser) override;
++  CefSize GetPdfPaperSize(CefRefPtr<CefBrowser> browser,
++                          int device_units_per_inch) override;
++
++ private:
++  IMPLEMENT_REFCOUNTING(ClientPrintHandlerQt);
++};
++
++}  // namespace client
++
++#endif  // CEF_TESTS_CEFCLIENT_BROWSER_PRINT_HANDLER_QT_H_
+diff -urN a/tests/cefclient/browser/root_window_create.cc b/tests/cefclient/browser/root_window_create.cc
+--- a/tests/cefclient/browser/root_window_create.cc	2026-07-30 22:09:36.000000000 +0200
++++ b/tests/cefclient/browser/root_window_create.cc	2026-08-02 00:50:47.720530650 +0200
+@@ -8,7 +8,11 @@
+ #if defined(OS_WIN)
+ #include "tests/cefclient/browser/root_window_win.h"
+ #elif defined(OS_LINUX)
++#if defined(CEF_USE_QT)
++#include "tests/cefclient/browser/root_window_qt.h"
++#else
+ #include "tests/cefclient/browser/root_window_gtk.h"
++#endif
+ #elif defined(OS_MAC)
+ #include "tests/cefclient/browser/root_window_mac.h"
+ #endif
+@@ -25,7 +29,11 @@
+ #if defined(OS_WIN)
+   return new RootWindowWin(use_alloy_style);
+ #elif defined(OS_LINUX)
++#if defined(CEF_USE_QT)
++  return new RootWindowQt(use_alloy_style);
++#else
+   return new RootWindowGtk(use_alloy_style);
++#endif
+ #elif defined(OS_MAC)
+   return new RootWindowMac(use_alloy_style);
+ #else
+diff -urN a/tests/cefclient/browser/root_window_qt.cc b/tests/cefclient/browser/root_window_qt.cc
+--- a/tests/cefclient/browser/root_window_qt.cc	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/browser/root_window_qt.cc	2026-08-02 00:50:47.722310278 +0200
+@@ -0,0 +1,659 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#include "tests/cefclient/browser/root_window_qt.h"
++
++#include <X11/Xlib.h>
++
++// X11 macros collide with Qt (e.g. Status vs QDataStream::Status).
++#undef Bool
++#undef CursorShape
++#undef Expose
++#undef FocusIn
++#undef FocusOut
++#undef FontChange
++#undef KeyPress
++#undef KeyRelease
++#undef None
++#undef Status
++#undef Success
++#undef Unsorted
++#undef RootWindow
++
++
++#include <QAction>
++#include <QApplication>
++#include <QCloseEvent>
++#include <QEvent>
++#include <QLineEdit>
++#include <QMainWindow>
++#include <QMenu>
++#include <QMenuBar>
++#include <QResizeEvent>
++#include <QScreen>
++#include <QToolBar>
++#include <QVBoxLayout>
++#include <QWidget>
++
++#include "include/base/cef_callback.h"
++#include "include/base/cef_logging.h"
++#include "include/wrapper/cef_helpers.h"
++#include "tests/cefclient/browser/browser_window_std_qt.h"
++#include "tests/cefclient/browser/client_handler.h"
++#include "tests/cefclient/browser/main_context.h"
++#include "tests/cefclient/browser/resource.h"
++#include "tests/cefclient/browser/temp_window.h"
++#include "tests/cefclient/browser/window_test_runner_qt.h"
++#include "tests/shared/browser/main_message_loop.h"
++#include "tests/shared/common/client_switches.h"
++
++namespace client {
++
++namespace {
++
++// Event filter that forwards resize/close/focus from the QMainWindow.
++class RootWindowEventFilter : public QObject {
++ public:
++  explicit RootWindowEventFilter(RootWindowQt* owner) : owner_(owner) {}
++
++  bool eventFilter(QObject* watched, QEvent* event) override {
++    switch (event->type()) {
++      case QEvent::Resize:
++      case QEvent::Move:
++        owner_->OnWindowResized();
++        break;
++      case QEvent::Close: {
++        // Returns true if the close should proceed.
++        if (!owner_->ShouldAcceptClose()) {
++          event->ignore();
++          return true;  // Filter (block) the close.
++        }
++        // Allow destruction path.
++        QObject::connect(watched, &QObject::destroyed, watched, [this]() {
++          owner_->NotifyWindowDestroyed();
++        });
++        break;
++      }
++      case QEvent::WindowActivate:
++        owner_->OnWindowFocused();
++        break;
++      default:
++        break;
++    }
++    return QObject::eventFilter(watched, event);
++  }
++
++ private:
++  RootWindowQt* owner_;
++};
++
++}  // namespace
++
++RootWindowQt::RootWindowQt(bool use_alloy_style)
++    : RootWindow(use_alloy_style) {}
++
++RootWindowQt::~RootWindowQt() {
++  REQUIRE_MAIN_THREAD();
++  DCHECK(window_destroyed_);
++  DCHECK(browser_destroyed_);
++}
++
++void RootWindowQt::Init(RootWindow::Delegate* delegate,
++                        std::unique_ptr<RootWindowConfig> config,
++                        const CefBrowserSettings& settings) {
++  DCHECK(delegate);
++  DCHECK(!initialized_);
++
++  delegate_ = delegate;
++  with_controls_ = config->with_controls;
++  always_on_top_ = config->always_on_top;
++  with_osr_ = config->with_osr;
++
++  if (with_osr_) {
++    LOG(WARNING) << "OSR is not implemented in the Qt sample; "
++                    "using a windowed browser instead.";
++    with_osr_ = false;
++  }
++
++  CreateBrowserWindow(config->url);
++
++  if (CefCurrentlyOn(TID_UI)) {
++    ContinueInitOnUIThread(std::move(config), settings);
++  } else {
++    CefPostTask(TID_UI, base::BindOnce(&RootWindowQt::ContinueInitOnUIThread,
++                                       this, std::move(config), settings));
++  }
++}
++
++void RootWindowQt::ContinueInitOnUIThread(
++    std::unique_ptr<RootWindowConfig> config,
++    const CefBrowserSettings& settings) {
++  CEF_REQUIRE_UI_THREAD();
++
++  if (!config->bounds.IsEmpty()) {
++    start_rect_ = config->bounds;
++    initial_show_state_ = config->show_state;
++  }
++
++  if (CURRENTLY_ON_MAIN_THREAD()) {
++    ContinueInitOnMainThread(std::move(config), settings);
++  } else {
++    MAIN_POST_CLOSURE(base::BindOnce(&RootWindowQt::ContinueInitOnMainThread,
++                                     this, std::move(config), settings));
++  }
++}
++
++void RootWindowQt::ContinueInitOnMainThread(
++    std::unique_ptr<RootWindowConfig> config,
++    const CefBrowserSettings& settings) {
++  REQUIRE_MAIN_THREAD();
++
++  initialized_ = true;
++  MAIN_POST_CLOSURE(base::BindOnce(&RootWindowQt::CreateRootWindow, this,
++                                   settings, config->initially_hidden));
++}
++
++void RootWindowQt::InitAsPopup(RootWindow::Delegate* delegate,
++                               bool with_controls,
++                               bool with_osr,
++                               const CefPopupFeatures& popupFeatures,
++                               CefWindowInfo& windowInfo,
++                               CefRefPtr<CefClient>& client,
++                               CefBrowserSettings& settings) {
++  CEF_REQUIRE_UI_THREAD();
++
++  DCHECK(delegate);
++  DCHECK(!initialized_);
++
++  delegate_ = delegate;
++  with_controls_ = with_controls;
++  with_osr_ = false;  // Qt sample: windowed only.
++  is_popup_ = true;
++
++  if (popupFeatures.xSet) {
++    start_rect_.x = popupFeatures.x;
++  }
++  if (popupFeatures.ySet) {
++    start_rect_.y = popupFeatures.y;
++  }
++  if (popupFeatures.widthSet) {
++    start_rect_.width = popupFeatures.width;
++  }
++  if (popupFeatures.heightSet) {
++    start_rect_.height = popupFeatures.height;
++  }
++
++  CreateBrowserWindow(std::string());
++  initialized_ = true;
++
++  browser_window_->GetPopupConfig(TempWindow::GetWindowHandle(), windowInfo,
++                                  client, settings);
++}
++
++void RootWindowQt::Show(ShowMode mode) {
++  REQUIRE_MAIN_THREAD();
++  if (!window_) {
++    return;
++  }
++
++  window_->show();
++  if (mode == ShowMinimized) {
++    window_->showMinimized();
++  } else if (mode == ShowMaximized) {
++    window_->showMaximized();
++  } else {
++    window_->showNormal();
++  }
++  window_->raise();
++  window_->activateWindow();
++}
++
++void RootWindowQt::Hide() {
++  REQUIRE_MAIN_THREAD();
++  if (window_) {
++    window_->hide();
++  }
++}
++
++void RootWindowQt::SetBounds(int x,
++                             int y,
++                             size_t width,
++                             size_t height,
++                             bool /*content_bounds*/) {
++  REQUIRE_MAIN_THREAD();
++  if (!window_) {
++    return;
++  }
++  window_->setGeometry(x, y, static_cast<int>(width), static_cast<int>(height));
++}
++
++bool RootWindowQt::DefaultToContentBounds() const {
++  // Windowed browser bounds come from GetRootWindowScreenRect.
++  return false;
++}
++
++void RootWindowQt::Close(bool force) {
++  REQUIRE_MAIN_THREAD();
++  if (window_) {
++    if (force) {
++      NotifyForceClose();
++    }
++    window_->close();
++  }
++}
++
++void RootWindowQt::SetDeviceScaleFactor(float /*device_scale_factor*/) {
++  REQUIRE_MAIN_THREAD();
++  // Windowed Qt sample does not implement OSR scale factors.
++}
++
++std::optional<float> RootWindowQt::GetDeviceScaleFactor() const {
++  REQUIRE_MAIN_THREAD();
++  return std::nullopt;
++}
++
++CefRefPtr<CefBrowser> RootWindowQt::GetBrowser() const {
++  REQUIRE_MAIN_THREAD();
++  if (browser_window_) {
++    return browser_window_->GetBrowser();
++  }
++  return nullptr;
++}
++
++ClientWindowHandle RootWindowQt::GetWindowHandle() const {
++  REQUIRE_MAIN_THREAD();
++  return window_;
++}
++
++bool RootWindowQt::WithWindowlessRendering() const {
++  REQUIRE_MAIN_THREAD();
++  DCHECK(initialized_);
++  return false;
++}
++
++void RootWindowQt::CreateBrowserWindow(const std::string& startup_url) {
++  browser_window_.reset(
++      new BrowserWindowStdQt(this, with_controls_, startup_url));
++}
++
++void RootWindowQt::BuildChromeUi() {
++  if (!with_controls_) {
++    return;
++  }
++
++  // Tests menu.
++  QMenu* tests = window_->menuBar()->addMenu(QStringLiteral("Tests"));
++  auto add_test = [this, tests](const char* label, int id) {
++    QAction* action = tests->addAction(QString::fromUtf8(label));
++    QObject::connect(action, &QAction::triggered, window_,
++                     [this, id]() { OnTestAction(id); });
++  };
++  add_test("Get Source", ID_TESTS_GETSOURCE);
++  add_test("Get Text", ID_TESTS_GETTEXT);
++  add_test("New Window", ID_TESTS_WINDOW_NEW);
++  add_test("Popup Window", ID_TESTS_WINDOW_POPUP);
++  add_test("Request", ID_TESTS_REQUEST);
++  add_test("Zoom In", ID_TESTS_ZOOM_IN);
++  add_test("Zoom Out", ID_TESTS_ZOOM_OUT);
++  add_test("Zoom Reset", ID_TESTS_ZOOM_RESET);
++  add_test("Print", ID_TESTS_PRINT);
++  add_test("Print to PDF", ID_TESTS_PRINT_TO_PDF);
++  add_test("Other Tests", ID_TESTS_OTHER_TESTS);
++  menubar_height_ = window_->menuBar()->sizeHint().height();
++
++  toolbar_ = window_->addToolBar(QStringLiteral("Navigation"));
++  toolbar_->setMovable(false);
++
++  back_action_ = toolbar_->addAction(QStringLiteral("Back"));
++  QObject::connect(back_action_, &QAction::triggered, window_,
++                   [this]() { OnBack(); });
++  forward_action_ = toolbar_->addAction(QStringLiteral("Forward"));
++  QObject::connect(forward_action_, &QAction::triggered, window_,
++                   [this]() { OnForward(); });
++  reload_action_ = toolbar_->addAction(QStringLiteral("Reload"));
++  QObject::connect(reload_action_, &QAction::triggered, window_,
++                   [this]() { OnReload(); });
++  stop_action_ = toolbar_->addAction(QStringLiteral("Stop"));
++  QObject::connect(stop_action_, &QAction::triggered, window_,
++                   [this]() { OnStop(); });
++
++  url_entry_ = new QLineEdit(window_);
++  toolbar_->addWidget(url_entry_);
++  QObject::connect(url_entry_, &QLineEdit::returnPressed, window_,
++                   [this]() { OnUrlEnter(); });
++
++  toolbar_height_ = toolbar_->sizeHint().height();
++}
++
++void RootWindowQt::CreateRootWindow(const CefBrowserSettings& settings,
++                                    bool /*initially_hidden*/) {
++  REQUIRE_MAIN_THREAD();
++  DCHECK(!window_);
++
++  int width = start_rect_.IsEmpty() ? 800 : start_rect_.width;
++  int height = start_rect_.IsEmpty() ? 600 : start_rect_.height;
++  int x = start_rect_.x;
++  int y = start_rect_.y;
++
++  window_ = new QMainWindow();
++  window_->setAttribute(Qt::WA_DeleteOnClose, false);
++  window_->setWindowTitle(QStringLiteral("cefclient (Qt)"));
++  window_->resize(width, height);
++  if (always_on_top_) {
++    window_->setWindowFlag(Qt::WindowStaysOnTopHint, true);
++  }
++
++  browser_host_ = new QWidget(window_);
++  browser_host_->setAttribute(Qt::WA_NativeWindow, true);
++  browser_host_->setAttribute(Qt::WA_DontCreateNativeAncestors, true);
++  window_->setCentralWidget(browser_host_);
++
++  BuildChromeUi();
++
++  auto* filter = new RootWindowEventFilter(this);
++  filter->setParent(window_);
++  window_->installEventFilter(filter);
++
++  // Show so native X11 windows exist before CreateBrowser.
++  Show(ShowNormal);
++  if (!start_rect_.IsEmpty()) {
++    window_->move(x, y);
++  }
++
++  // Provide XDisplay for reparent/bounds.
++  XDisplay* xdisplay = cef_get_xdisplay();
++  CHECK(xdisplay);
++  static_cast<BrowserWindowStdQt*>(browser_window_.get())
++      ->set_xdisplay(xdisplay);
++
++  // Initial browser bounds = full host widget.
++  const QSize host_size = browser_host_->size();
++  browser_bounds_ = CefRect(0, 0, host_size.width(), host_size.height());
++
++  if (!is_popup_) {
++    browser_window_->CreateBrowser(browser_host_, browser_bounds_, settings,
++                                   nullptr, delegate_->GetRequestContext());
++  } else {
++    browser_window_->ShowPopup(browser_host_, browser_bounds_.x,
++                               browser_bounds_.y, browser_bounds_.width,
++                               browser_bounds_.height);
++  }
++
++  window_created_ = true;
++}
++
++void RootWindowQt::OnBrowserCreated(CefRefPtr<CefBrowser> browser) {
++  REQUIRE_MAIN_THREAD();
++  if (is_popup_) {
++    CreateRootWindow(CefBrowserSettings(), false);
++  }
++}
++
++void RootWindowQt::OnBrowserWindowClosing() {
++  if (!CefCurrentlyOn(TID_UI)) {
++    CefPostTask(TID_UI,
++                base::BindOnce(&RootWindowQt::OnBrowserWindowClosing, this));
++    return;
++  }
++  is_closing_ = true;
++}
++
++void RootWindowQt::OnBrowserWindowDestroyed() {
++  REQUIRE_MAIN_THREAD();
++  browser_window_.reset();
++  if (!window_destroyed_) {
++    Close(true);
++  }
++  NotifyDestroyedIfDone(false, true);
++}
++
++void RootWindowQt::OnSetAddress(const std::string& url) {
++  REQUIRE_MAIN_THREAD();
++  if (url_entry_) {
++    url_entry_->setText(QString::fromStdString(url));
++  }
++}
++
++void RootWindowQt::OnSetTitle(const std::string& title) {
++  REQUIRE_MAIN_THREAD();
++  if (window_) {
++    window_->setWindowTitle(QString::fromStdString(title));
++  }
++}
++
++void RootWindowQt::OnSetFullscreen(bool fullscreen) {
++  REQUIRE_MAIN_THREAD();
++  if (!window_) {
++    return;
++  }
++  if (fullscreen) {
++    window_->showMaximized();
++  } else {
++    window_->showNormal();
++  }
++}
++
++void RootWindowQt::OnAutoResize(const CefSize& new_size) {
++  REQUIRE_MAIN_THREAD();
++  if (window_) {
++    window_->resize(new_size.width, new_size.height);
++  }
++}
++
++void RootWindowQt::OnSetLoadingState(bool isLoading,
++                                     bool canGoBack,
++                                     bool canGoForward) {
++  REQUIRE_MAIN_THREAD();
++  if (!with_controls_) {
++    return;
++  }
++  if (stop_action_) {
++    stop_action_->setEnabled(isLoading);
++  }
++  if (reload_action_) {
++    reload_action_->setEnabled(!isLoading);
++  }
++  if (back_action_) {
++    back_action_->setEnabled(canGoBack);
++  }
++  if (forward_action_) {
++    forward_action_->setEnabled(canGoForward);
++  }
++}
++
++void RootWindowQt::OnSetDraggableRegions(
++    const std::vector<CefDraggableRegion>& /*regions*/) {
++  REQUIRE_MAIN_THREAD();
++}
++
++bool RootWindowQt::GetRootWindowScreenRect(CefRect& rect) {
++  CEF_REQUIRE_UI_THREAD();
++  if (!window_) {
++    return false;
++  }
++  const QRect g = window_->frameGeometry();
++  rect = CefRect(g.x(), g.y(), g.width(), g.height());
++  return true;
++}
++
++void RootWindowQt::NotifyMoveOrResizeStarted() {
++  REQUIRE_MAIN_THREAD();
++  if (auto browser = GetBrowser()) {
++    browser->GetHost()->NotifyMoveOrResizeStarted();
++  }
++}
++
++void RootWindowQt::NotifySetFocus() {
++  REQUIRE_MAIN_THREAD();
++  if (!browser_window_) {
++    return;
++  }
++  browser_window_->SetFocus(true);
++  delegate_->OnRootWindowActivated(this);
++}
++
++void RootWindowQt::NotifyVisibilityChange(bool show) {
++  REQUIRE_MAIN_THREAD();
++  if (!browser_window_) {
++    return;
++  }
++  if (show) {
++    browser_window_->Show();
++  } else {
++    browser_window_->Hide();
++  }
++}
++
++void RootWindowQt::NotifyContentBounds(int x, int y, int width, int height) {
++  if (!CURRENTLY_ON_MAIN_THREAD()) {
++    MAIN_POST_CLOSURE(base::BindOnce(&RootWindowQt::NotifyContentBounds, this,
++                                     x, y, width, height));
++    return;
++  }
++
++  browser_bounds_ = CefRect(x, y, width, height);
++  if (browser_window_) {
++    browser_window_->SetBounds(x, y, width, height);
++  }
++}
++
++void RootWindowQt::NotifyLoadURL(const std::string& url) {
++  REQUIRE_MAIN_THREAD();
++  CefRefPtr<CefBrowser> browser = GetBrowser();
++  if (browser) {
++    browser->GetMainFrame()->LoadURL(url);
++  }
++}
++
++void RootWindowQt::NotifyButtonClicked(int id) {
++  REQUIRE_MAIN_THREAD();
++  CefRefPtr<CefBrowser> browser = GetBrowser();
++  if (!browser) {
++    return;
++  }
++  switch (id) {
++    case IDC_NAV_BACK:
++      browser->GoBack();
++      break;
++    case IDC_NAV_FORWARD:
++      browser->GoForward();
++      break;
++    case IDC_NAV_RELOAD:
++      browser->Reload();
++      break;
++    case IDC_NAV_STOP:
++      browser->StopLoad();
++      break;
++    default:
++      NOTREACHED() << "id=" << id;
++  }
++}
++
++void RootWindowQt::NotifyMenuItem(int id) {
++  REQUIRE_MAIN_THREAD();
++  if (delegate_) {
++    delegate_->OnTest(this, id);
++  }
++}
++
++void RootWindowQt::NotifyForceClose() {
++  REQUIRE_MAIN_THREAD();
++  force_close_ = true;
++}
++
++void RootWindowQt::NotifyCloseBrowser() {
++  REQUIRE_MAIN_THREAD();
++  CefRefPtr<CefBrowser> browser = GetBrowser();
++  if (browser) {
++    browser->GetHost()->CloseBrowser(false);
++  }
++}
++
++void RootWindowQt::NotifyDestroyedIfDone(bool window_destroyed,
++                                         bool browser_destroyed) {
++  DCHECK_EQ(1, window_destroyed + browser_destroyed);
++
++  if (!CURRENTLY_ON_MAIN_THREAD()) {
++    MAIN_POST_CLOSURE(base::BindOnce(&RootWindowQt::NotifyDestroyedIfDone, this,
++                                     window_destroyed, browser_destroyed));
++    return;
++  }
++
++  if (window_destroyed) {
++    window_destroyed_ = true;
++  }
++  if (browser_destroyed) {
++    browser_destroyed_ = true;
++  }
++
++  if (window_destroyed_ && browser_destroyed_) {
++    if (window_) {
++      delete window_;
++      window_ = nullptr;
++      browser_host_ = nullptr;
++      toolbar_ = nullptr;
++      url_entry_ = nullptr;
++    }
++    delegate_->OnRootWindowDestroyed(this);
++  }
++}
++
++void RootWindowQt::OnBack() {
++  NotifyButtonClicked(IDC_NAV_BACK);
++}
++void RootWindowQt::OnForward() {
++  NotifyButtonClicked(IDC_NAV_FORWARD);
++}
++void RootWindowQt::OnReload() {
++  NotifyButtonClicked(IDC_NAV_RELOAD);
++}
++void RootWindowQt::OnStop() {
++  NotifyButtonClicked(IDC_NAV_STOP);
++}
++
++void RootWindowQt::OnUrlEnter() {
++  if (url_entry_) {
++    NotifyLoadURL(url_entry_->text().toStdString());
++  }
++}
++
++void RootWindowQt::OnTestAction(int id) {
++  NotifyMenuItem(id);
++}
++
++bool RootWindowQt::ShouldAcceptClose() {
++  REQUIRE_MAIN_THREAD();
++  if (force_close_ || is_closing_) {
++    return true;
++  }
++  // Ask the browser to close first (onbeforeunload, etc.).
++  NotifyCloseBrowser();
++  return false;
++}
++
++void RootWindowQt::NotifyWindowDestroyed() {
++  NotifyDestroyedIfDone(true, false);
++}
++
++void RootWindowQt::OnCloseRequested() {
++  // Kept for API symmetry with the header; close path uses ShouldAcceptClose.
++  (void)ShouldAcceptClose();
++}
++
++void RootWindowQt::OnWindowResized() {
++  REQUIRE_MAIN_THREAD();
++  if (!browser_host_) {
++    return;
++  }
++  const QSize s = browser_host_->size();
++  NotifyContentBounds(0, 0, s.width(), s.height());
++  NotifyMoveOrResizeStarted();
++}
++
++void RootWindowQt::OnWindowFocused() {
++  REQUIRE_MAIN_THREAD();
++  NotifySetFocus();
++}
++
++}  // namespace client
+diff -urN a/tests/cefclient/browser/root_window_qt.h b/tests/cefclient/browser/root_window_qt.h
+--- a/tests/cefclient/browser/root_window_qt.h	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/browser/root_window_qt.h	2026-08-02 00:50:47.726211456 +0200
+@@ -0,0 +1,145 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#ifndef CEF_TESTS_CEFCLIENT_BROWSER_ROOT_WINDOW_QT_H_
++#define CEF_TESTS_CEFCLIENT_BROWSER_ROOT_WINDOW_QT_H_
++#pragma once
++
++#include <memory>
++#include <string>
++
++#include "tests/cefclient/browser/browser_window.h"
++#include "tests/cefclient/browser/root_window.h"
++
++class QAction;
++class QLineEdit;
++class QMainWindow;
++class QToolBar;
++class QWidget;
++
++namespace client {
++
++// Qt implementation of a top-level native window in the browser process.
++// Demonstrates embedding CEF into a Qt application (parallel to RootWindowGtk).
++// Intentionally not a QObject so the sample builds without a moc step.
++class RootWindowQt : public RootWindow, public BrowserWindow::Delegate {
++ public:
++  explicit RootWindowQt(bool use_alloy_style);
++  ~RootWindowQt() override;
++
++  RootWindowQt(const RootWindowQt&) = delete;
++  RootWindowQt& operator=(const RootWindowQt&) = delete;
++
++  // RootWindow methods.
++  void Init(RootWindow::Delegate* delegate,
++            std::unique_ptr<RootWindowConfig> config,
++            const CefBrowserSettings& settings) override;
++  void InitAsPopup(RootWindow::Delegate* delegate,
++                   bool with_controls,
++                   bool with_osr,
++                   const CefPopupFeatures& popupFeatures,
++                   CefWindowInfo& windowInfo,
++                   CefRefPtr<CefClient>& client,
++                   CefBrowserSettings& settings) override;
++  void Show(ShowMode mode) override;
++  void Hide() override;
++  void SetBounds(int x,
++                 int y,
++                 size_t width,
++                 size_t height,
++                 bool content_bounds) override;
++  bool DefaultToContentBounds() const override;
++  void Close(bool force) override;
++  void SetDeviceScaleFactor(float device_scale_factor) override;
++  std::optional<float> GetDeviceScaleFactor() const override;
++  CefRefPtr<CefBrowser> GetBrowser() const override;
++  ClientWindowHandle GetWindowHandle() const override;
++  bool WithWindowlessRendering() const override;
++
++  // Called from Qt event filter / lambda connections.
++  void OnBack();
++  void OnForward();
++  void OnReload();
++  void OnStop();
++  void OnUrlEnter();
++  void OnTestAction(int id);
++  void OnCloseRequested();
++  void OnWindowResized();
++  void OnWindowFocused();
++  // Returns true if a QCloseEvent should proceed.
++  bool ShouldAcceptClose();
++  void NotifyWindowDestroyed();
++
++ private:
++  void ContinueInitOnUIThread(std::unique_ptr<RootWindowConfig> config,
++                              const CefBrowserSettings& settings);
++  void ContinueInitOnMainThread(std::unique_ptr<RootWindowConfig> config,
++                                const CefBrowserSettings& settings);
++  void CreateBrowserWindow(const std::string& startup_url);
++  void CreateRootWindow(const CefBrowserSettings& settings,
++                        bool initially_hidden);
++
++  // BrowserWindow::Delegate methods.
++  bool UseAlloyStyle() const override { return IsAlloyStyle(); }
++  void OnBrowserCreated(CefRefPtr<CefBrowser> browser) override;
++  void OnBrowserWindowClosing() override;
++  void OnBrowserWindowDestroyed() override;
++  void OnSetAddress(const std::string& url) override;
++  void OnSetTitle(const std::string& title) override;
++  void OnSetFullscreen(bool fullscreen) override;
++  void OnAutoResize(const CefSize& new_size) override;
++  void OnContentsBounds(const CefRect& new_bounds) override {
++    RootWindow::SetBounds(new_bounds,
++                          /*content_bounds=*/DefaultToContentBounds());
++  }
++  void OnSetLoadingState(bool isLoading,
++                         bool canGoBack,
++                         bool canGoForward) override;
++  void OnSetDraggableRegions(
++      const std::vector<CefDraggableRegion>& regions) override;
++  bool GetRootWindowScreenRect(CefRect& rect) override;
++
++  void NotifyMoveOrResizeStarted();
++  void NotifySetFocus();
++  void NotifyVisibilityChange(bool show);
++  void NotifyContentBounds(int x, int y, int width, int height);
++  void NotifyLoadURL(const std::string& url);
++  void NotifyButtonClicked(int id);
++  void NotifyMenuItem(int id);
++  void NotifyForceClose();
++  void NotifyCloseBrowser();
++  void NotifyDestroyedIfDone(bool window_destroyed, bool browser_destroyed);
++
++  void BuildChromeUi();
++
++  bool with_controls_ = false;
++  bool always_on_top_ = false;
++  bool with_osr_ = false;
++  bool is_popup_ = false;
++  CefRect start_rect_;
++  cef_show_state_t initial_show_state_ = CEF_SHOW_STATE_NORMAL;
++  std::unique_ptr<BrowserWindow> browser_window_;
++
++  QMainWindow* window_ = nullptr;
++  QWidget* browser_host_ = nullptr;
++  QToolBar* toolbar_ = nullptr;
++  QLineEdit* url_entry_ = nullptr;
++  QAction* back_action_ = nullptr;
++  QAction* forward_action_ = nullptr;
++  QAction* reload_action_ = nullptr;
++  QAction* stop_action_ = nullptr;
++
++  int toolbar_height_ = 0;
++  int menubar_height_ = 0;
++  CefRect browser_bounds_;
++
++  bool window_destroyed_ = false;
++  bool browser_destroyed_ = false;
++  bool force_close_ = false;
++  bool is_closing_ = false;
++};
++
++}  // namespace client
++
++#endif  // CEF_TESTS_CEFCLIENT_BROWSER_ROOT_WINDOW_QT_H_
+diff -urN a/tests/cefclient/browser/window_test.cc b/tests/cefclient/browser/window_test.cc
+--- a/tests/cefclient/browser/window_test.cc	2026-07-30 22:09:36.000000000 +0200
++++ b/tests/cefclient/browser/window_test.cc	2026-08-02 00:50:47.729799271 +0200
+@@ -21,7 +21,11 @@
+ #if defined(OS_WIN)
+ #include "tests/cefclient/browser/window_test_runner_win.h"
+ #elif defined(OS_LINUX)
++#if defined(CEF_USE_QT)
++#include "tests/cefclient/browser/window_test_runner_qt.h"
++#else
+ #include "tests/cefclient/browser/window_test_runner_gtk.h"
++#endif
+ #elif defined(OS_MAC)
+ #include "tests/cefclient/browser/window_test_runner_mac.h"
+ #endif
+@@ -50,7 +54,11 @@
+ #if defined(OS_WIN)
+   return std::make_unique<WindowTestRunnerWin>();
+ #elif defined(OS_LINUX)
++#if defined(CEF_USE_QT)
++  return std::make_unique<WindowTestRunnerQt>();
++#else
+   return std::make_unique<WindowTestRunnerGtk>();
++#endif
+ #elif defined(OS_MAC)
+   return std::make_unique<WindowTestRunnerMac>();
+ #else
+diff -urN a/tests/cefclient/browser/window_test_runner_qt.cc b/tests/cefclient/browser/window_test_runner_qt.cc
+--- a/tests/cefclient/browser/window_test_runner_qt.cc	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/browser/window_test_runner_qt.cc	2026-08-02 00:50:47.733926141 +0200
+@@ -0,0 +1,53 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#include "tests/cefclient/browser/window_test_runner_qt.h"
++
++#include <QMainWindow>
++#include <QWidget>
++
++#include "include/wrapper/cef_helpers.h"
++#include "tests/cefclient/browser/root_window.h"
++#include "tests/shared/browser/main_message_loop.h"
++
++namespace client {
++namespace window_test {
++namespace {
++
++QWidget* GetWindow(CefRefPtr<CefBrowser> browser) {
++  scoped_refptr<RootWindow> root_window =
++      RootWindow::GetForBrowser(browser->GetIdentifier());
++  if (root_window) {
++    return root_window->GetWindowHandle();
++  }
++  return nullptr;
++}
++
++}  // namespace
++
++WindowTestRunnerQt::WindowTestRunnerQt() = default;
++
++void WindowTestRunnerQt::Minimize(CefRefPtr<CefBrowser> browser) {
++  REQUIRE_MAIN_THREAD();
++  if (auto* window = GetWindow(browser)) {
++    window->showMinimized();
++  }
++}
++
++void WindowTestRunnerQt::Maximize(CefRefPtr<CefBrowser> browser) {
++  REQUIRE_MAIN_THREAD();
++  if (auto* window = GetWindow(browser)) {
++    window->showMaximized();
++  }
++}
++
++void WindowTestRunnerQt::Restore(CefRefPtr<CefBrowser> browser) {
++  REQUIRE_MAIN_THREAD();
++  if (auto* window = GetWindow(browser)) {
++    window->showNormal();
++  }
++}
++
++}  // namespace window_test
++}  // namespace client
+diff -urN a/tests/cefclient/browser/window_test_runner_qt.h b/tests/cefclient/browser/window_test_runner_qt.h
+--- a/tests/cefclient/browser/window_test_runner_qt.h	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/browser/window_test_runner_qt.h	2026-08-02 00:50:47.734998072 +0200
+@@ -0,0 +1,26 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#ifndef CEF_TESTS_CEFCLIENT_BROWSER_WINDOW_TEST_RUNNER_QT_H_
++#define CEF_TESTS_CEFCLIENT_BROWSER_WINDOW_TEST_RUNNER_QT_H_
++#pragma once
++
++#include "tests/cefclient/browser/window_test_runner.h"
++
++namespace client {
++namespace window_test {
++
++class WindowTestRunnerQt : public WindowTestRunner {
++ public:
++  WindowTestRunnerQt();
++
++  void Minimize(CefRefPtr<CefBrowser> browser) override;
++  void Maximize(CefRefPtr<CefBrowser> browser) override;
++  void Restore(CefRefPtr<CefBrowser> browser) override;
++};
++
++}  // namespace window_test
++}  // namespace client
++
++#endif  // CEF_TESTS_CEFCLIENT_BROWSER_WINDOW_TEST_RUNNER_QT_H_
+diff -urN a/tests/cefclient/cefclient_qt.cc b/tests/cefclient/cefclient_qt.cc
+--- a/tests/cefclient/cefclient_qt.cc	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cefclient/cefclient_qt.cc	2026-08-02 00:50:47.738836709 +0200
+@@ -0,0 +1,156 @@
++// Copyright (c) 2026 The Chromium Embedded Framework Authors. All rights
++// reserved. Use of this source code is governed by a BSD-style license that
++// can be found in the LICENSE file.
++
++#include <X11/Xlib.h>
++
++// X11 macros collide with Qt (e.g. Status vs QDataStream::Status).
++#undef Bool
++#undef CursorShape
++#undef Expose
++#undef FocusIn
++#undef FocusOut
++#undef FontChange
++#undef KeyPress
++#undef KeyRelease
++#undef None
++#undef Status
++#undef Success
++#undef Unsorted
++#undef RootWindow
++
++
++#include <signal.h>
++
++#include <QApplication>
++
++#include <memory>
++#include <string>
++
++#include "include/base/cef_logging.h"
++#include "include/cef_app.h"
++#include "include/cef_command_line.h"
++#include "include/wrapper/cef_helpers.h"
++#include "tests/cefclient/browser/main_context_impl.h"
++#include "tests/cefclient/browser/main_message_loop_multithreaded_qt.h"
++#include "tests/cefclient/browser/test_runner.h"
++#include "tests/shared/browser/client_app_browser.h"
++#include "tests/shared/browser/main_message_loop_external_pump.h"
++#include "tests/shared/browser/main_message_loop_std.h"
++#include "tests/shared/common/client_app_other.h"
++#include "tests/shared/common/client_switches.h"
++#include "tests/shared/renderer/client_app_renderer.h"
++
++namespace client {
++namespace {
++
++int XErrorHandlerImpl(Display* display, XErrorEvent* event) {
++  LOG(WARNING) << "X error received: "
++               << "type " << event->type << ", "
++               << "serial " << event->serial << ", "
++               << "error_code " << static_cast<int>(event->error_code) << ", "
++               << "request_code " << static_cast<int>(event->request_code)
++               << ", "
++               << "minor_code " << static_cast<int>(event->minor_code);
++  return 0;
++}
++
++int XIOErrorHandlerImpl(Display* display) {
++  return 0;
++}
++
++void TerminationSignalHandler(int signatl) {
++  LOG(ERROR) << "Received termination signal: " << signatl;
++  MainContext::Get()->GetRootWindowManager()->CloseAllWindows(true);
++}
++
++NO_STACK_PROTECTOR
++int RunMain(int argc, char* argv[]) {
++  CefScopedArgArray scoped_arg_array(argc, argv);
++  char** argv_copy = scoped_arg_array.array();
++
++  CefMainArgs main_args(argc, argv);
++
++  CefRefPtr<CefCommandLine> command_line = CefCommandLine::CreateCommandLine();
++  command_line->InitFromArgv(argc, argv);
++
++  CefRefPtr<CefApp> app;
++  ClientApp::ProcessType process_type = ClientApp::GetProcessType(command_line);
++  if (process_type == ClientApp::BrowserProcess) {
++    app = new ClientAppBrowser();
++  } else if (process_type == ClientApp::RendererProcess ||
++             process_type == ClientApp::ZygoteProcess) {
++    app = new ClientAppRenderer();
++  } else if (process_type == ClientApp::OtherProcess) {
++    app = new ClientAppOther();
++  }
++
++  int exit_code = CefExecuteProcess(main_args, app, nullptr);
++  if (exit_code >= 0) {
++    return exit_code;
++  }
++
++  auto context = std::make_unique<MainContextImpl>(command_line, true);
++
++  CefSettings settings;
++
++#if !defined(CEF_USE_SANDBOX)
++  settings.no_sandbox = true;
++#endif
++
++  context->PopulateSettings(&settings);
++
++  // Prefer XCB so winId() yields X11 windows compatible with CEF's X11 path.
++  // Must be set before QApplication is constructed.
++  qputenv("QT_QPA_PLATFORM", "xcb");
++
++  // Create Qt application before the message loop so multi-threaded mode can
++  // drive QApplication::exec().
++  QApplication qt_app(argc, argv_copy);
++
++  std::unique_ptr<MainMessageLoop> message_loop;
++  if (settings.multi_threaded_message_loop) {
++    message_loop.reset(new MainMessageLoopMultithreadedQt);
++  } else if (settings.external_message_pump) {
++    message_loop = MainMessageLoopExternalPump::Create();
++  } else {
++    message_loop.reset(new MainMessageLoopStd);
++  }
++
++  if (!context->Initialize(main_args, settings, app, nullptr)) {
++    return CefGetExitCode();
++  }
++
++  XSetErrorHandler(XErrorHandlerImpl);
++  XSetIOErrorHandler(XIOErrorHandlerImpl);
++
++  signal(SIGINT, TerminationSignalHandler);
++  signal(SIGTERM, TerminationSignalHandler);
++
++  test_runner::RegisterSchemeHandlers();
++
++  auto window_config = std::make_unique<RootWindowConfig>();
++  window_config->always_on_top =
++      command_line->HasSwitch(switches::kAlwaysOnTop);
++  window_config->with_osr =
++      settings.windowless_rendering_enabled ? true : false;
++
++  context->GetRootWindowManager()->CreateRootWindow(std::move(window_config));
++
++  int result = message_loop->Run();
++
++  context->Shutdown();
++
++  message_loop.reset();
++  context.reset();
++
++  return result;
++}
++
++}  // namespace
++}  // namespace client
++
++NO_STACK_PROTECTOR
++int main(int argc, char* argv[]) {
++  return client::RunMain(argc, argv);
++}

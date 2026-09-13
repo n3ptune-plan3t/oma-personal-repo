@@ -1,0 +1,16 @@
+diff -Naur a/build/toolchain/gcc_toolchain.gni b/build/toolchain/gcc_toolchain.gni
+--- a/build/toolchain/gcc_toolchain.gni	2026-08-16 12:56:58.657668670 +0200
++++ b/build/toolchain/gcc_toolchain.gni	2026-08-16 12:56:58.657788272 +0200
+@@ -321,8 +321,11 @@
+     }
+ 
+     # -fmodule-name is not supported by gcc.
++    # Do not pass it on every cc/cxx command when modules are off.
++    # Clang 23 ICEs in SourceManager::getPresumedLoc on aarch64 Blink
++    # compiles with -fmodule-name=..._Private (ABF 653532, 653753).
+     module_name_flag = ""
+-    if (is_clang) {
++    if (is_clang && use_clang_modules) {
+       module_name_flag = " -fmodule-name=\"{{cc_module_name}}_Private\""
+     }
+ 

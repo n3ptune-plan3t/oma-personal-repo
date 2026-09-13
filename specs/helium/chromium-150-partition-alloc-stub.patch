@@ -1,0 +1,15 @@
+--- chromium-150.0.7871.114/base/allocator/partition_allocator/BUILD.gn.pa~
++++ chromium-150.0.7871.114/base/allocator/partition_allocator/BUILD.gn
+@@ -15,6 +15,12 @@
+   group("partition_alloc") {
+     public_deps = [ "src/partition_alloc" ]
+   }
++} else {
++  # Dawn always depends on :partition_alloc when dawn_partition_alloc_dir is
++  # set (build_overrides/dawn.gni). Keep a stub so gn gen succeeds when
++  # PartitionAlloc is disabled (e.g. distro builds with snmalloc).
++  group("partition_alloc") {
++  }
+ }
+ 
+ if (use_allocator_shim) {
