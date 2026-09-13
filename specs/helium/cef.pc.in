@@ -1,0 +1,38 @@
+# Chromium Embedded Framework (OpenMandriva / Helium packaging)
+#
+# Dual layout:
+#   - OnlyOffice/OBS style tree under ${libdir}/cef/{Release,Resources,...}
+#   - FHS convenience: -lcef / -I${includedir} via the symlinks this package installs
+#
+# C API only:
+#   cflags=$(pkg-config --cflags cef)
+#   libs=$(pkg-config --libs cef)
+#
+# C++ API (static wrapper is built with system libstdc++):
+#   cflags=$(pkg-config --cflags cef)
+#   libs=$(pkg-config --libs cef) \
+#         $(pkg-config --variable=wrapper_lib cef) -lstdc++
+#
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=@LIBDIR@
+includedir=@INCLUDEDIR@
+
+# Root of the CEF binary distribution tree (OnlyOffice/OBS layout).
+cef_root=${libdir}/cef
+cef_libdir=${cef_root}/Release
+cef_resources=${cef_root}/Resources
+# Static C++ wrapper archive (system libstdc++ ABI).
+wrapper_lib=${cef_root}/libcef_dll_wrapper/libcef_dll_wrapper.a
+# Path embedders should use for chrome-sandbox / subprocess discovery.
+sandbox=${cef_libdir}/chrome-sandbox
+
+Name: cef
+Description: Chromium Embedded Framework (libcef)
+URL: https://bitbucket.org/chromiumembedded/cef
+Version: @VERSION@
+
+# Keep RPATH so the process loads libcef and its dlopen'd companions from
+# ${cef_libdir} without requiring LD_LIBRARY_PATH.
+Libs: -L${libdir} -lcef -Wl,-rpath,${cef_libdir}
+Cflags: -I${includedir}
