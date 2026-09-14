@@ -7,8 +7,8 @@ Release:        1
 Summary:        Linux office suite with similar appearance to MS Office
 Group:          Office
 # The old Kingsoft WPS Community License has disappeared from the site.
-# There is an EULA in the archive that we ship as %license, plus a
-# non-downloadable EULA only reachable from inside the program:
+# There is an EULA in the archive that we ship as the package license file,
+# plus a non-downloadable EULA only reachable from inside the program:
 # https://www.wps.com/eula?distsrc=2021help&lang=en_US&version=11.1.0.10920
 License:        EULA
 URL:            https://www.wps.com/
@@ -19,18 +19,17 @@ Source0:        http://wdl1.pcfg.cache.wpscdn.com/wpsdl/wpsoffice/download/linux
 
 ExclusiveArch:  x86_64
 BuildRequires:  cpio
+BuildRequires:  hardlink
 
 # Vendor package ships prebuilt, unusual/bundled sonames -- don't try to
-# scan them for auto Requires/Provides (mirrors allow_unknown_shlibs /
-# noshlibprovides in the Void template).
+# scan them for auto Requires/Provides
 AutoReqProv:    no
 
-# nostrip / nodebug equivalent: this is untouched vendor binary, skip
+# this is untouched vendor binary, skip
 # find-debuginfo and stripping entirely.
 %global debug_package %{nil}
 %global __os_install_post %{nil}
 
-# Matches the Void template's conflicts= line.
 Conflicts:      EternalTerminal
 
 %description
@@ -51,7 +50,7 @@ rpm2cpio %{SOURCE0} | cpio -idmv
 mkdir -p %{buildroot}
 cp -a ./opt %{buildroot}/
 
-# Disable background services (matches post_install in the Void template)
+# Disable background services
 chmod -x %{buildroot}/opt/kingsoft/wps-office/office6/wpsd
 chmod -x %{buildroot}/opt/kingsoft/wps-office/office6/wpscloudsvr
 
@@ -69,6 +68,15 @@ rm -f %{buildroot}/opt/kingsoft/wps-office/office6/librpcwppapi.so
 rm -f %{buildroot}/opt/kingsoft/wps-office/office6/libdbus-1.so*
 rm -f %{buildroot}/opt/kingsoft/wps-office/office6/libstdc++.so.6
 rm -f %{buildroot}/opt/kingsoft/wps-office/office6/libstdc++.so.6.0.28
+
+# These two are plain config files but ship with a spurious executable
+# bit, which makes rpmlint try (and fail) to parse them as shell scripts.
+chmod -x %{buildroot}/opt/kingsoft/wps-office/office6/cfgs/domain_qing.cfg
+chmod -x %{buildroot}/opt/kingsoft/wps-office/office6/skins/2019gov/skin.ini
+
+# The vendor payload ships many byte-identical files (per-locale strings,
+# repeated icons, duplicated .so files) -- hardlink them to reclaim space.
+hardlink -c %{buildroot} || :
 
 %files
 /opt/kingsoft/wps-office
