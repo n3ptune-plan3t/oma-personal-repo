@@ -2,7 +2,7 @@
 
 Name:           ttf-wps-fonts
 Version:        0.1
-Release:        1
+Release:        2
 Summary:        Linux office suite with similar appearance to MS Office - font files
 Group:          Graphics
 # See wps-office.spec for the license background; this repo ships no
