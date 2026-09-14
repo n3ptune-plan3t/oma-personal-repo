@@ -16,6 +16,7 @@ URL:            https://www.wps.com/
 # Upstream only distributes this as a prebuilt vendor RPM, so we just
 # repack it rather than compiling anything ourselves.
 Source0:        http://wdl1.pcfg.cache.wpscdn.com/wpsdl/wpsoffice/download/linux/%{wpsrel}/%{name}-%{version}.XA-1.x86_64.rpm
+Source1L        wps-office.rpmlintrc
 
 ExclusiveArch:  x86_64
 BuildRequires:  cpio
