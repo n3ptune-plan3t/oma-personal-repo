@@ -1,0 +1,19 @@
+# These three are inherent to shipping a prebuilt, self-contained vendor
+# binary under /opt and can't be addressed by editing the spec or the
+# payload -- see the packaging notes in wps-office.spec for details.
+
+# Every one of the thousands of files under /opt trips this; that's
+# expected for a vendor package that isn't on rpmlint's /opt allowlist.
+addFilter(r"wps-office\.x86_64: E: dir-or-file-in-opt")
+
+# The bundled binaries need $ORIGIN-relative RPATH to find their own
+# bundled .so files (they can't rely on the system linker path).
+addFilter(r"wps-office\.x86_64: E: binary-or-shlib-defines-rpath")
+
+# Deprecated network calls inside vendor-bundled libnspr4/libcrypto --
+# not code we control or rebuild.
+addFilter(r"wps-office\.x86_64: [EW]: binary-or-shlib-calls-gethostbyname")
+
+# No SPDX/rpmlint-recognized tag fits a closed-source EULA; see the
+# License: comment in the spec for the actual licensing situation.
+addFilter(r"wps-office\.(x86_64|noarch): W: invalid-license EULA")
