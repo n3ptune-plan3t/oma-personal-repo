@@ -3,7 +3,7 @@
 
 Name:           wps-office
 Version:        %{wpsver}
-Release:        1
+Release:        2
 Summary:        Linux office suite with similar appearance to MS Office
 Group:          Office
 # The old Kingsoft WPS Community License has disappeared from the site.
