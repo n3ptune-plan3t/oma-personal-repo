@@ -18,7 +18,7 @@ URL:            https://www.wps.com/
 Source0:        http://wdl1.pcfg.cache.wpscdn.com/wpsdl/wpsoffice/download/linux/%{wpsrel}/%{name}-%{version}.XA-1.x86_64.rpm
 Source1:        wps-office.rpmlintrc
 
-ExclusiveArch:  x86_64
+ExclusiveArch:  %{x86_64}
 BuildRequires:  cpio
 BuildRequires:  hardlink
 
