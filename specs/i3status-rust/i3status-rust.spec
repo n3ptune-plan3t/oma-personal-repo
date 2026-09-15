@@ -1,20 +1,16 @@
 %define debug_package %nil
-
 Name:           i3status-rust
 Version:        0.36.1
 Release:        1
 Summary:        Feature-rich and resource-friendly replacement for i3status, written in Rust
 
-License:        GPLv3+
+License:        GPL-3.0-only
 URL:            https://github.com/greshake/i3status-rust
 Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 
-BuildRequires:  cargo
-BuildRequires:  rust-packaging
 BuildRequires:  pkgconfig(libpulse)
 BuildRequires:  pkgconfig(dbus-1)
-BuildRequires:  pkgconfig(openssl)
-BuildRequires:  lm_sensors-devel
+BuildRequires:  rust-packaging
 
 %description
 i3status-rs is a feature-rich and resource-friendly replacement for i3status,
@@ -24,20 +20,18 @@ compatible with sway.
 
 %prep
 %autosetup -p1
+%cargo_prep
+
+%generate_buildrequires
+%cargo_generate_buildrequires
 
 %build
-cargo build --release
+%cargo_build
 
 %install
-mkdir -p %{buildroot}%{_bindir}
-
-install -m 0755 \
-target/release/i3status-rs \
-%{buildroot}%{_bindir}/i3status-rs
-
-install -m 0644 -Dp \
-example_config.toml \
-%{buildroot}%{_sysconfdir}/xdg/i3/status.toml
+%cargo_install
+# Basic configuration file. Mandatory for successful i3status-rust run.
+install -m 0644 -Dp example_config.toml %{buildroot}%{_sysconfdir}/xdg/i3/status.toml
 
 %files
 %license LICENSE
