@@ -51,7 +51,7 @@ jobs:
       fail-fast: false
 
     container:
-        image: openmandriva/minimal:rolling
+        image: openmandriva/minimal:cooker
         options: --platform linux/amd64 --privileged
 
     steps:
