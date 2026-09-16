@@ -3,31 +3,29 @@
 
 Name:           wps-office
 Version:        %{wpsver}
-Release:        2
+Release:        3
 Summary:        Linux office suite with similar appearance to MS Office
 Group:          Office
+
 # The old Kingsoft WPS Community License has disappeared from the site.
-# There is an EULA in the archive that we ship as the package license file,
-# plus a non-downloadable EULA only reachable from inside the program:
+# There is an EULA in the archive that we ship as the package license file, plus a non-downloadable EULA only reachable from inside the program:
 # https://www.wps.com/eula?distsrc=2021help&lang=en_US&version=11.1.0.10920
-License:        EULA
+License:        Custom (EULA)
 URL:            https://www.wps.com/
 
-# Upstream only distributes this as a prebuilt vendor RPM, so we just
-# repack it rather than compiling anything ourselves.
+# Upstream only distributes this as a prebuilt vendor RPM, so we just repack it rather than compiling anything ourselves.
 Source0:        http://wdl1.pcfg.cache.wpscdn.com/wpsdl/wpsoffice/download/linux/%{wpsrel}/%{name}-%{version}.XA-1.x86_64.rpm
 Source1:        wps-office.rpmlintrc
 
 ExclusiveArch:  %{x86_64}
 BuildRequires:  cpio
 BuildRequires:  hardlink
+BuildRequires:  desktop-file-utils
 
-# Vendor package ships prebuilt, unusual/bundled sonames -- don't try to
-# scan them for auto Requires/Provides
+# Vendor package ships prebuilt, unusual/bundled sonames -- don't try to scan them for auto Requires/Provides
 AutoReqProv:    no
 
-# this is untouched vendor binary, skip
-# find-debuginfo and stripping entirely.
+# this is untouched vendor binary, skip find-debuginfo and stripping entirely.
 %global debug_package %{nil}
 %global __os_install_post %{nil}
 
@@ -39,8 +37,7 @@ Office, providing word processing, spreadsheet, and presentation
 applications.
 
 %prep
-# There's no tarball to unpack -- just create an empty build dir and
-# extract the vendor RPM's payload into it ourselves.
+# There's no tarball to unpack -- just create an empty build dir and extract the vendor RPM's payload into it ourselves.
 %setup -q -c -T
 rpm2cpio %{SOURCE0} | cpio -idmv
 
@@ -61,8 +58,7 @@ rm -rf %{buildroot}/etc
 # Vendor postinst/prerm scripts we don't want to ship
 rm -rf %{buildroot}/opt/kingsoft/wps-office/INSTALL
 
-# Qt4 rpc libs, bundled systemd/libdbus, and bundled libstdc++ -- the
-# distro already provides compatible versions of all of these.
+# Qt4 rpc libs, bundled systemd/libdbus, and bundled libstdc++ -- openmandriva already provides compatible versions of all of these.
 rm -f %{buildroot}/opt/kingsoft/wps-office/office6/librpcetapi.so
 rm -f %{buildroot}/opt/kingsoft/wps-office/office6/librpcwpsapi.so
 rm -f %{buildroot}/opt/kingsoft/wps-office/office6/librpcwppapi.so
@@ -70,14 +66,30 @@ rm -f %{buildroot}/opt/kingsoft/wps-office/office6/libdbus-1.so*
 rm -f %{buildroot}/opt/kingsoft/wps-office/office6/libstdc++.so.6
 rm -f %{buildroot}/opt/kingsoft/wps-office/office6/libstdc++.so.6.0.28
 
-# These two are plain config files but ship with a spurious executable
-# bit, which makes rpmlint try (and fail) to parse them as shell scripts.
+# These two are plain config files but ship with a spurious executable bit, which makes rpmlint try (and fail) to parse them as shell scripts.
 chmod -x %{buildroot}/opt/kingsoft/wps-office/office6/cfgs/domain_qing.cfg
 chmod -x %{buildroot}/opt/kingsoft/wps-office/office6/skins/2019gov/skin.ini
 
-# The vendor payload ships many byte-identical files (per-locale strings,
-# repeated icons, duplicated .so files) -- hardlink them to reclaim space.
+# The vendor payload ships many byte-identical files (per-locale strings, repeated icons, duplicated .so files) -- hardlink them to reclaim space.
 hardlink -c %{buildroot} || :
+
+# Vendor .desktop files live under /opt
+mkdir -p %{buildroot}%{_datadir}/applications
+for f in %{buildroot}/opt/kingsoft/wps-office/desktops/*.desktop; do
+    desktop-file-install --dir=%{buildroot}%{_datadir}/applications "$f"
+done
+
+# Exec= in the vendor files points at /usr/bin/{et,wps,wpp,wpspdf}, which don't exist anywhere in the payload -- provide them ourselves.
+mkdir -p %{buildroot}%{_bindir}
+for b in et wps wpp wpspdf; do
+    ln -s /opt/kingsoft/wps-office/office6/$b %{buildroot}%{_bindir}/$b
+done
+
+%post
+update-desktop-database -q &> /dev/null || :
+
+%postun
+update-desktop-database -q &> /dev/null || :
 
 %files
 /opt/kingsoft/wps-office
@@ -87,3 +99,9 @@ hardlink -c %{buildroot} || :
 %license opt/kingsoft/wps-office/office6/mui/default/EULA_linux.html
 %license opt/kingsoft/wps-office/office6/thirdpartylegalnotices.txt
 %doc opt/kingsoft/wps-office/office6/mui/default/Privacy_Linux.html
+%{_bindir}/et
+%{_bindir}/wps
+%{_bindir}/wpp
+%{_bindir}/wpspdf
+%{_datadir}/applications/*.desktop
+%{_datadir}/pixmaps/*.png
