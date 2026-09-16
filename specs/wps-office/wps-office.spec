@@ -104,4 +104,3 @@ update-desktop-database -q &> /dev/null || :
 %{_bindir}/wpp
 %{_bindir}/wpspdf
 %{_datadir}/applications/*.desktop
-%{_datadir}/pixmaps/*.png
