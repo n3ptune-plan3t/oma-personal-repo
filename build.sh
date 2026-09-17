@@ -74,7 +74,8 @@ dnf install -y \
     curl \
     createrepo_c \
     github-cli \
-    hostname
+    hostname \
+    gnutar
 
 # ============================================================
 # Create builder user
@@ -347,7 +348,7 @@ if printf '%s' "$VENDOR_LINE" | grep -q -- '-vendor\.tar\.xz$'; then
             cd vendor-src
             mkdir -p .cargo
             cargo vendor vendor > .cargo/config-vendor.toml
-            tar --sort=name --owner=0 --group=0 --numeric-owner \
+            gtar --sort=name --owner=0 --group=0 --numeric-owner \
                 -cJf '../$VENDOR_FILE' vendor
         "
 
