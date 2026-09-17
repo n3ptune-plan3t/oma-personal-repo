@@ -25,6 +25,7 @@ compatible with sway.
 
 %prep
 %autosetup -p1
+%cargo_prep
 
 %build
 # cargo build --release
