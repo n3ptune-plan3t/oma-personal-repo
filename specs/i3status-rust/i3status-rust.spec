@@ -17,6 +17,9 @@ BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(openssl)
 BuildRequires:  lm_sensors-devel
 
+%generate_buildrequires
+%cargo_generate_buildrequires
+
 %description
 i3status-rs is a feature-rich and resource-friendly replacement for i3status,
 written in pure Rust. It provides a way to display "blocks" of system
