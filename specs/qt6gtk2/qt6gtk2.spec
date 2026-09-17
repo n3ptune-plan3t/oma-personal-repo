@@ -7,6 +7,7 @@ Group:          System/Libraries
 URL:            https://www.opencode.net/trialuser/qt6gtk2
 Source0:        https://www.opencode.net/trialuser/qt6gtk2/-/archive/%{version}/qt6gtk2-%{version}.tar.bz2
 
+BuildRequires:  make
 BuildRequires:  qmake-qt6
 BuildRequires:  pkgconfig(gtk+-2.0)
 BuildRequires:  pkgconfig(x11)
