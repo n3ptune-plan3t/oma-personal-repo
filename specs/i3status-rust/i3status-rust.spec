@@ -13,7 +13,7 @@ Source1:        %{name}-%{version}-vendor.tar.xz
 BuildRequires:  cargo
 BuildRequires:  pkgconfig(libpulse)
 BuildRequires:  pkgconfig(dbus-1)
-BuildRequires:  pkgconfig(openssl)
+BuildRequires:  pkgconfig(openssl3)
 BuildRequires:  lm_sensors-devel
 
 %description
