@@ -343,7 +343,7 @@ if printf '%s' "$VENDOR_LINE" | grep -q -- '-vendor\.tar\.xz$'; then
             curl -fL -o '$SRC_TARBALL' '$SRC_URL'
             rm -rf vendor-src
             mkdir vendor-src
-            tar xf '$SRC_TARBALL' -C vendor-src --strip-components=1
+            tar -xf '$SRC_TARBALL' -C vendor-src --strip-components=1
             cd vendor-src
             mkdir -p .cargo
             cargo vendor vendor > .cargo/config-vendor.toml
