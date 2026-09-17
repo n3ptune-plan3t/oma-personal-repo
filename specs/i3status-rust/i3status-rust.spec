@@ -5,20 +5,16 @@ Version:        0.36.1
 Release:        1
 Summary:        Feature-rich and resource-friendly replacement for i3status, written in Rust
 
-License:        GPLv3+
+License:        GPL-3.0-or-later
 URL:            https://github.com/greshake/i3status-rust
 Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
+Source1:        %{name}-%{version}-vendor.tar.xz
 
 BuildRequires:  cargo
-BuildRequires:  python-cargo2rpm
-BuildRequires:  rust-packaging
 BuildRequires:  pkgconfig(libpulse)
 BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  pkgconfig(openssl)
 BuildRequires:  lm_sensors-devel
-
-%generate_buildrequires
-%cargo_generate_buildrequires
 
 %description
 i3status-rs is a feature-rich and resource-friendly replacement for i3status,
@@ -27,16 +23,21 @@ information (time, battery status, volume, etc) on the i3 bar. It is also
 compatible with sway.
 
 %prep
-%autosetup -p1
-%cargo_prep
+%autosetup -p1 -a1
+mkdir -p .cargo
+cat > .cargo/config.toml <<'EOF'
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"
+EOF
 
 %build
-# cargo build --release
-%cargo_build
+cargo build --release --offline
 
 %install
-# install -m 0755 target/rpm/i3status-rs %{buildroot}%{_bindir}/i3status-rs
-
+install -Dm0755 target/release/i3status-rs %{buildroot}%{_bindir}/i3status-rs
 install -m 0644 -Dp example_config.toml %{buildroot}%{_sysconfdir}/xdg/i3/status.toml
 
 %files
