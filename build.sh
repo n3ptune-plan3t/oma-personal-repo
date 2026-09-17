@@ -71,6 +71,7 @@ dnf install -y \
     rpmlint \
     git \
     sudo \
+    curl \
     createrepo_c \
     github-cli \
     hostname
@@ -301,6 +302,60 @@ if grep -Eq '^BuildRequires:\s*(cargo|rust-packaging)\b' "$ABF/$PKG.spec"; then
     echo
     echo "==> Cargo target"
     rustc -vV
+fi
+
+# ============================================================
+# Vendor Rust dependencies (only if the spec ships a vendored
+# Source, i.e. one named "*-vendor.tar.xz"). This regenerates
+# the vendor tarball fresh every run from the exact source the
+# spec's Version/URL resolve to, instead of committing a stale
+# binary blob to the repo. Any future Rust package that follows
+# the same Source1 naming convention picks this up automatically
+# — nothing here is specific to one package name.
+# ============================================================
+
+VENDOR_LINE=$(grep -E '^Source1:' "$ABF/$PKG.spec" || true)
+
+if printf '%s' "$VENDOR_LINE" | grep -q -- '-vendor\.tar\.xz$'; then
+    echo
+    echo "============================================================"
+    echo " Vendoring Rust dependencies for $PKG"
+    echo "============================================================"
+
+    # Ask rpm to resolve the spec's own macros for us instead of
+    # re-implementing macro expansion by hand.
+    SPEC_VERSION=$(rpm -q --qf '%{VERSION}\n' --specfile "$ABF/$PKG.spec" | head -n1)
+    SPEC_URL=$(rpm -q --qf '%{URL}\n' --specfile "$ABF/$PKG.spec" | head -n1)
+
+    VENDOR_FILE="$PKG-$SPEC_VERSION-vendor.tar.xz"
+    SRC_TARBALL="$PKG-$SPEC_VERSION.tar.gz"
+    # Matches the Source0 convention: %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
+    SRC_URL="$SPEC_URL/archive/v$SPEC_VERSION/$SRC_TARBALL"
+
+    if [ -f "$ABF/$VENDOR_FILE" ]; then
+        echo "==> $VENDOR_FILE already present in specs/$PKG/, skipping regeneration"
+    else
+        echo "==> Building $VENDOR_FILE from $SRC_URL"
+
+        su builder -c "
+            set -eu
+            cd '$ABF'
+            curl -fL -o '$SRC_TARBALL' '$SRC_URL'
+            rm -rf vendor-src
+            mkdir vendor-src
+            tar xf '$SRC_TARBALL' -C vendor-src --strip-components=1
+            cd vendor-src
+            mkdir -p .cargo
+            cargo vendor vendor > .cargo/config-vendor.toml
+            tar --sort=name --owner=0 --group=0 --numeric-owner \
+                -cJf '../$VENDOR_FILE' vendor
+        "
+
+        rm -f "$ABF/$SRC_TARBALL"
+        rm -rf "$ABF/vendor-src"
+    fi
+
+    ls -la "$ABF/$VENDOR_FILE"
 fi
 
 # ============================================================
