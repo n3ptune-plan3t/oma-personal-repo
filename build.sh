@@ -338,6 +338,19 @@ if printf '%s' "$VENDOR_LINE" | grep -q -- '-vendor\.tar\.xz$'; then
     else
         echo "==> Building $VENDOR_FILE from $SRC_URL"
 
+        # Any Patch0.. declared in the spec (e.g. one that changes
+        # Cargo.toml dependency features) must land in vendor-src
+        # *before* `cargo vendor` runs, or the vendored crates won't
+        # match what the patched Cargo.toml actually needs — %prep's
+        # own patching happens in a separate checkout and has no
+        # effect on this one. Applied with `patch -p1`, matching the
+        # `-p1` %autosetup already uses in %prep.
+        PATCH_FILES=$(
+            grep -E '^Patch[0-9]+:' "$ABF/$PKG.spec" |
+            sort -t: -k1,1V |
+            sed -E 's/^Patch[0-9]+:[[:space:]]*//'
+        )
+
         su builder -c "
             set -eu
             cd '$ABF'
@@ -346,6 +359,10 @@ if printf '%s' "$VENDOR_LINE" | grep -q -- '-vendor\.tar\.xz$'; then
             mkdir vendor-src
             tar -xf '$SRC_TARBALL' -C vendor-src --strip-components=1
             cd vendor-src
+            for p in $PATCH_FILES; do
+                echo \"==> Applying \$p before vendoring\"
+                patch -p1 < \"../\$p\"
+            done
             mkdir -p .cargo
             cargo vendor vendor > .cargo/config-vendor.toml
             gtar --sort=name --owner=0 --group=0 --numeric-owner \
