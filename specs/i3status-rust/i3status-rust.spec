@@ -35,10 +35,11 @@ replace-with = "vendored-sources"
 [source.vendored-sources]
 directory = "vendor"
 EOF
+
 %build
 rm -rf target
 cargo clean
-cargo build --release --offline --locked
+cargo build --release --offline
 
 %install
 install -Dm0755 target/release/i3status-rs %{buildroot}%{_bindir}/i3status-rs
