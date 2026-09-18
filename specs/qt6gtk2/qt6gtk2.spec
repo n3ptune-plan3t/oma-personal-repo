@@ -15,6 +15,14 @@ BuildRequires:  cmake(Qt6Core)
 BuildRequires:  cmake(Qt6Gui)
 BuildRequires:  cmake(Qt6Widgets)
 
+# qmake-qt6 does not propagate %{optflags} into the build, so the resulting
+# plugin binaries carry no usable DWARF source info. RPM's automatic
+# debuginfo generation then tries to build a qt6gtk2-debugsource subpackage
+# from an empty source list and fails with:
+#   error: Empty %files file .../debugsourcefiles.list
+# Disable debugsource subpackage generation for this package.
+%undefine _debugsource_packages
+
 %description
 Qt6Gtk2 provides GTK+2.0 platform theme and style plugins for Qt 6.
 This allows Qt6 applications to better integrate with GTK-based
