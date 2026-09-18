@@ -43,10 +43,8 @@ CARGO_PROFILE_RELEASE_LTO=off cargo build --release --offline
 
 %install
 install -Dm0755 target/release/i3status-rs %{buildroot}%{_bindir}/i3status-rs
-install -m 0644 -Dp example_config.toml %{buildroot}%{_sysconfdir}/xdg/i3/status.toml
 
 %files
 %license LICENSE
 %doc README.md NEWS.md CONTRIBUTING.md blocks.md example_config.toml example_icon.toml example_theme.toml themes.md
 %{_bindir}/i3status-rs
-%{_sysconfdir}/xdg/i3/status.toml
