@@ -9,11 +9,14 @@ License:        GPL-3.0-or-later
 URL:            https://github.com/greshake/i3status-rust
 Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 Source1:        %{name}-%{version}-vendor.tar.xz
+# Switches reqwest (and, transitively, oauth2) from default-tls
+# (openssl-sys) to rustls-tls, since the vendored openssl-sys does
+# not yet support OpenSSL 4.x. See patch header for details.
+Patch0:         0001-reqwest-use-rustls-tls.patch
 
 BuildRequires:  cargo
 BuildRequires:  pkgconfig(libpulse)
 BuildRequires:  pkgconfig(dbus-1)
-BuildRequires:  pkgconfig(openssl3)
 BuildRequires:  lm_sensors-devel
 
 %description
