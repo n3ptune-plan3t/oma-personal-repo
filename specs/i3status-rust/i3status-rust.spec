@@ -27,8 +27,14 @@ compatible with sway.
 
 %prep
 %autosetup -p1 -a1
-%cargo_prep -v vendor
+mkdir -p .cargo
+cat > .cargo/config.toml <<'EOF'
+[source.crates-io]
+replace-with = "vendored-sources"
 
+[source.vendored-sources]
+directory = "vendor"
+EOF
 %build
 rm -rf target
 cargo clean
