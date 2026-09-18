@@ -27,17 +27,12 @@ compatible with sway.
 
 %prep
 %autosetup -p1 -a1
-mkdir -p .cargo
-cat > .cargo/config.toml <<'EOF'
-[source.crates-io]
-replace-with = "vendored-sources"
-
-[source.vendored-sources]
-directory = "vendor"
-EOF
+%cargo_prep -v vendor
 
 %build
-cargo build --release --offline
+rm -rf target
+cargo clean
+cargo build --release --offline --locked
 
 %install
 install -Dm0755 target/release/i3status-rs %{buildroot}%{_bindir}/i3status-rs
