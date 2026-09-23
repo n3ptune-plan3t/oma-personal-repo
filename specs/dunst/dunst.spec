@@ -41,7 +41,7 @@ we all love to customize to perfection.
 %doc RELEASE_NOTES README.md CHANGELOG.md AUTHORS
 %license LICENSE
 %dir %{_sysconfdir}/%{name}
-%config %{_sysconfdir}/%{name}/dunstrc
+%config(noreplace) %{_sysconfdir}/%{name}/dunstrc
 %{_bindir}/%{name}
 %{_bindir}/dunstctl
 %{_bindir}/dunstify
@@ -49,4 +49,8 @@ we all love to customize to perfection.
 %{_userunitdir}/%{name}.service
 %{_mandir}/man1/%{name}.1.*
 %{_mandir}/man1/dunstctl.1.*
+%{_mandir}/man1/dunstify.1.*
 %{_mandir}/man5/%{name}.5.*
+%{_datadir}/bash-completion/completions/dunst*
+%{_datadir}/fish/vendor_completions.d/dunst*.fish
+%{_datadir}/zsh/site-functions/_dunst*
