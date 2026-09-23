@@ -25,6 +25,11 @@ This package installs upstream's official pre-built static executable,
 since OpenMandriva does not currently package the GHC toolchain and
 Haskell library set that a from-source build of Stack would require.
 
+# Upstream's binary is already stripped and statically linked, so there is
+# no debug info to split out; without this, rpmbuild errors on an empty
+# debugsourcefiles.list when trying to generate a -debugsource package.
+%global debug_package %{nil}
+
 %prep
 %autosetup -n %{name}-%{version}-linux-x86_64
 
