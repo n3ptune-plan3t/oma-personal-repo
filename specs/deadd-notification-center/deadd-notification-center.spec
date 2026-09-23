@@ -9,8 +9,8 @@ Source0:        https://codeload.github.com/phuhl/linux_notification_center/tar.
 
 # NOTE ON THE BUILD PATH:
 # This is a Haskell/Stack project (stack.yaml + .cabal file), not a plain
-# Makefile project, so `%make_build`/`%make_install` below won't actually
-# invoke Stack correctly on their own - see the %build/%install comments.
+# Makefile project, so `make_build`/`make_install` below won't actually
+# invoke Stack correctly on their own - see the build/install comments.
 #
 # More importantly: `stack build` normally resolves its package snapshot
 # and fetches dependencies from Stackage/Hackage over the network. ABF's
