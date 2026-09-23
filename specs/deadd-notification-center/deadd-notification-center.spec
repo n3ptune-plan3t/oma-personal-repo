@@ -29,7 +29,7 @@ Source0:        https://codeload.github.com/phuhl/linux_notification_center/tar.
 # what was asked for, but treat this as a local/dev-sandbox spec until
 # the cabal-based path above is worked out for a real ABF submission.
 BuildRequires:  stack
-BuildRequires:  ghc
+BuildRequires:  ghc7.0
 BuildRequires:  pkgconfig(cairo)
 BuildRequires:  pkgconfig(pango)
 BuildRequires:  pkgconfig(gobject-introspection-1.0)
