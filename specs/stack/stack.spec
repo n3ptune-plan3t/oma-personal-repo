@@ -17,8 +17,6 @@ URL:            https://haskellstack.org
 # package has no runtime library Requires.
 Source0:        https://github.com/commercialhaskell/stack/releases/download/v%{version}/stack-%{version}-linux-x86_64.tar.gz
 
-ExclusiveArch:  x86_64
-
 %description
 Stack is a cross-platform program for developing Haskell projects. It is
 intended for Haskellers both new and experienced.
