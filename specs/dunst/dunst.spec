@@ -32,16 +32,16 @@ we all love to customize to perfection.
 %setup -q
 
 %build
-%make_build PREFIX=%{_prefix} SYSCONFDIR=%{_sysconfdir}/xdg
+%make_build PREFIX=%{_prefix} SYSCONFDIR=%{_sysconfdir}
 
 %install
-%make_install PREFIX=%{_prefix} SYSCONFDIR=%{_sysconfdir}/xdg
+%make_install PREFIX=%{_prefix} SYSCONFDIR=%{_sysconfdir}
 
 %files
 %doc RELEASE_NOTES README.md CHANGELOG.md AUTHORS
 %license LICENSE
-%dir %{_sysconfdir}/xdg/%{name}
-%config(noreplace) %{_sysconfdir}/xdg/%{name}/dunstrc
+%dir %{_sysconfdir}/%{name}
+%config %{_sysconfdir}/%{name}/dunstrc
 %{_bindir}/%{name}
 %{_bindir}/dunstctl
 %{_bindir}/dunstify
