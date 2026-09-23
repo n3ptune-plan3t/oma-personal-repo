@@ -37,7 +37,7 @@ sed -i -e 's,source.crates-io,sources.unused,g' .cargo/config.toml
 cat %{SOURCE2} >>.cargo/config.toml
 
 %build
-%cargo_build --workspace --bins
+%cargo_build
 
 %install
 install -Dm0755 -t %{buildroot}%{_bindir} target/release/xidlehook
@@ -45,7 +45,7 @@ install -Dm0755 -t %{buildroot}%{_bindir} target/release/xidlehook-client
 
 %check
 %if %{with test}
-%cargo_test --workspace
+%cargo_test
 %endif
 
 %files
