@@ -3,7 +3,7 @@
 
 Name:           wps-office
 Version:        %{wpsver}
-Release:        3
+Release:        4
 Summary:        Linux office suite with similar appearance to MS Office
 Group:          Office
 
@@ -21,6 +21,10 @@ ExclusiveArch:  %{x86_64}
 BuildRequires:  cpio
 BuildRequires:  hardlink
 BuildRequires:  desktop-file-utils
+BuildRequires:  patchelf
+
+Requires:       libtiff.so.6()(64bit)
+Requires:       ttf-wps-fonts
 
 # Vendor package ships prebuilt, unusual/bundled sonames -- don't try to scan them for auto Requires/Provides
 AutoReqProv:    no
@@ -69,6 +73,16 @@ rm -f %{buildroot}/opt/kingsoft/wps-office/office6/libstdc++.so.6.0.28
 # These two are plain config files but ship with a spurious executable bit, which makes rpmlint try (and fail) to parse them as shell scripts.
 chmod -x %{buildroot}/opt/kingsoft/wps-office/office6/cfgs/domain_qing.cfg
 chmod -x %{buildroot}/opt/kingsoft/wps-office/office6/skins/2019gov/skin.ini
+
+# Vendor libs are linked against libtiff.so.5, which Cooker doesn't ship (only .6).
+# Without this, "export to PDF" fails with a generic error.
+pushd %{buildroot}/opt/kingsoft/wps-office/office6
+for f in libpdfmain.so libqpdfpaint.so \
+         qt/plugins/imageformats/libqtiff.so \
+         addons/pdfbatchcompression/libpdfbatchcompressionapp.so; do
+    patchelf --replace-needed libtiff.so.5 libtiff.so.6 "$f"
+done
+popd
 
 # The vendor payload ships many byte-identical files (per-locale strings, repeated icons, duplicated .so files) -- hardlink them to reclaim space.
 hardlink -c %{buildroot} || :
