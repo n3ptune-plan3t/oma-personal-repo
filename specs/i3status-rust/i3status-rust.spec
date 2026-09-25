@@ -10,6 +10,7 @@ License:        GPL-3.0-or-later
 URL:            https://github.com/greshake/i3status-rust
 Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 Source1:        %{name}-%{version}-vendor.tar.xz
+Source2:        cargo_config
 
 # Switches reqwest (and, transitively, oauth2) from openssl-sys to rustls-tls;
 # the vendored openssl-sys does not yet support OpenSSL 4.x. All crates this
@@ -41,6 +42,8 @@ compatible with sway.
 %prep
 %autosetup -p1 -a1
 %cargo_prep
+sed -i -e 's,source.crates-io,sources.rust-sucks,g' .cargo/config.toml
+cat %{SOURCE2} >>.cargo/config.toml
 
 %build
 export CARGO_PROFILE_RELEASE_LTO=off
