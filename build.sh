@@ -303,6 +303,40 @@ if grep -Eq '^BuildRequires:\s*(cargo|rust-packaging)\b' "$ABF/$PKG.spec"; then
     echo
     echo "==> Cargo target"
     rustc -vV
+
+    # A spec can declare a version floor via `BuildRequires: rust >= X` /
+    # `cargo >= X` (see niri, i3status-rust). Check it explicitly and fail
+    # fast with a clear message: a builder older than the floor otherwise
+    # fails deep inside cargo's manifest parsing (e.g. a crate using
+    # `edition = "2024"`, which needs cargo/rustc >= 1.85, errors with an
+    # opaque "feature `edition2024` is required" instead of naming the
+    # actual version gap).
+    echo
+    echo "==> Checking declared minimum rust/cargo version"
+
+    check_min_version() {
+        tool="$1"
+        installed="$2"
+        required="$3"
+
+        lowest=$(printf '%s\n%s\n' "$installed" "$required" | sort -V | head -n1)
+        if [ "$lowest" != "$required" ]; then
+            echo "ERROR: $tool $installed is older than $PKG.spec's declared minimum ($required)" >&2
+            exit 1
+        fi
+        echo "    $tool $installed satisfies declared minimum >= $required"
+    }
+
+    RUSTC_VER=$(rustc --version | awk '{print $2}')
+    CARGO_VER=$(cargo --version | awk '{print $2}')
+
+    RUST_MIN=$(grep -E '^BuildRequires:[[:space:]]*rust[[:space:]]*>=' "$ABF/$PKG.spec" |
+        sed -E 's/^BuildRequires:[[:space:]]*rust[[:space:]]*>=[[:space:]]*//' | tr -d '[:space:]' || true)
+    CARGO_MIN=$(grep -E '^BuildRequires:[[:space:]]*cargo[[:space:]]*>=' "$ABF/$PKG.spec" |
+        sed -E 's/^BuildRequires:[[:space:]]*cargo[[:space:]]*>=[[:space:]]*//' | tr -d '[:space:]' || true)
+
+    [ -n "$RUST_MIN" ] && check_min_version rustc "$RUSTC_VER" "$RUST_MIN"
+    [ -n "$CARGO_MIN" ] && check_min_version cargo "$CARGO_VER" "$CARGO_MIN"
 fi
 
 # ============================================================
