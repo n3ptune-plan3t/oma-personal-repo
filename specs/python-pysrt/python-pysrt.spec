@@ -33,5 +33,9 @@ for basic subtitle file manipulation.
 %files
 %doc README.rst
 %{py_puresitedir}/%{module}
-%{py_puresitedir}/%{module}-%{version}.dist-info
+# Legacy setup.py-only builds don't reliably produce a *.dist-info dir
+# with a predictable name (sometimes it's *.egg-info instead); glob it,
+# matching OpenMandriva's own python-chardet.spec, which hits the same
+# no-pyproject.toml situation.
+%{py_puresitedir}/*.*-info
 %{_bindir}/srt
