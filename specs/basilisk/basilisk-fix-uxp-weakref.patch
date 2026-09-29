@@ -1,0 +1,32 @@
+From ba0112d574b4b63b3fa7af48de5ad587278e6ac0 Mon Sep 17 00:00:00 2001
+From: Basilisk-Dev <basiliskdev@protonmail.com>
+Date: Mon, 2 Mar 2026 00:01:39 -0500
+Subject: [PATCH] Issue #2957 - make WeakRefObject finalize on main thread (no
+ background finalize)
+
+---
+ js/src/builtin/WeakRefObject.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/js/src/builtin/WeakRefObject.cpp b/js/src/builtin/WeakRefObject.cpp
+index 8e8feb3f3d..856002dbb7 100644
+--- a/js/src/builtin/WeakRefObject.cpp
++++ b/js/src/builtin/WeakRefObject.cpp
+@@ -162,6 +162,7 @@ WeakRefObject::trace(JSTracer* trc, JSObject* obj)
+ /* static */ void
+ WeakRefObject::finalize(FreeOp* fop, JSObject* obj)
+ {
++    MOZ_ASSERT(!fop->maybeOffMainThread());
+     if (Referent* data = GetReferent(obj))
+         fop->delete_(data);
+ }
+@@ -184,8 +185,7 @@ static const ClassOps WeakRefObjectClassOps = {
+ const Class WeakRefObject::class_ = {
+     "WeakRef",
+     JSCLASS_HAS_PRIVATE |
+-    JSCLASS_HAS_CACHED_PROTO(JSProto_WeakRef) |
+-    JSCLASS_BACKGROUND_FINALIZE,
++    JSCLASS_HAS_CACHED_PROTO(JSProto_WeakRef),
+     &WeakRefObjectClassOps
+ };
+ 
