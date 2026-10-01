@@ -6,7 +6,7 @@
 
 Summary:	A dynamic adaptive system tuning daemon
 Name:		tuned
-Version:	2.27.0
+Version:	2.28.0
 Release:	1
 License:	GPLv2+
 URL:		https://github.com/redhat-performance/tuned
@@ -77,108 +77,21 @@ Requires:	systemtap
 This package contains several systemtap scripts to allow detailed
 manual monitoring of the system.
 
-%package profiles-compat
-Summary:	Additional tuned profiles mainly for backward compatibility with tuned 1.0
-Group:		System/Kernel and hardware
+%package profiles
+Summary:	Additional tuned profiles (compat, SAP, MSSQL, Oracle, Atomic, realtime, NFV, CPU partitioning, Spectrum Scale, PostgreSQL, OpenShift)
 Requires:	%{name} = %{version}-%{release}
+%global old_profiles compat sap sap-hana mssql oracle atomic realtime nfv-guest nfv-host nfv cpu-partitioning spectrumscale postgresql openshift
+%{lua:
+for p in string.gmatch(rpm.expand("%{old_profiles}"), "%S+") do
+  print(rpm.expand("Obsoletes:\t%{name}-profiles-" .. p .. " < %{version}-%{release}\n"))
+  print(rpm.expand("Provides:\t%{name}-profiles-" .. p .. " = %{version}-%{release}\n"))
+end
+}
 
-%description profiles-compat
-Additional tuned profiles mainly for backward compatibility with tuned 1.0.
-
-%package profiles-sap
-Summary:	Additional tuned profile(s) targeted to SAP NetWeaver loads
-Requires:	%{name} = %{version}-%{release}
-
-%description profiles-sap
-Additional tuned profile(s) targeted to SAP NetWeaver loads.
-
-%package profiles-sap-hana
-Summary:	Additional tuned profile(s) targeted to SAP HANA loads
-Requires:	%{name} = %{version}-%{release}
-
-%description profiles-sap-hana
-Additional tuned profile(s) targeted to SAP HANA loads.
-
-%package profiles-mssql
-Summary:	Additional tuned profile(s) for MS SQL Server
-Requires:	%{name} = %{version}-%{release}
-
-%description profiles-mssql
-Additional tuned profile(s) for MS SQL Server.
-
-%package profiles-oracle
-Summary:	Additional tuned profile(s) targeted to Oracle loads
-Requires:	%{name} = %{version}-%{release}
-
-%description profiles-oracle
-Additional tuned profile(s) targeted to Oracle loads.
-
-%package profiles-atomic
-Summary:	Additional tuned profile(s) targeted to Atomic
-Requires:	%{name} = %{version}-%{release}
-
-%description profiles-atomic
-Additional tuned profile(s) targeted to Atomic host and guest.
-
-%package profiles-realtime
-Summary:	Additional tuned profile(s) targeted to realtime
-Requires:	%{name} = %{version}-%{release}
-
-%description profiles-realtime
-Additional tuned profile(s) targeted to realtime.
-
-%package profiles-nfv-guest
-Summary:	Additional tuned profile(s) targeted to Network Function Virtualization (NFV) guest
-Requires:	%{name} = %{version}-%{release}
-Requires:	%{name}-profiles-realtime = %{version}-%{release}
-
-%description profiles-nfv-guest
-Additional tuned profile(s) targeted to Network Function Virtualization (NFV) guest.
-
-%package profiles-nfv-host
-Summary:	Additional tuned profile(s) targeted to Network Function Virtualization (NFV) host
-Requires:	%{name} = %{version}-%{release}
-Requires:	%{name}-profiles-realtime = %{version}-%{release}
-
-%description profiles-nfv-host
-Additional tuned profile(s) targeted to Network Function Virtualization (NFV) host.
-
-%package profiles-nfv
-Summary:	Additional tuned profile(s) targeted to Network Function Virtualization (NFV)
-Requires:	%{name} = %{version}-%{release}
-Requires:	%{name}-profiles-nfv-guest = %{version}-%{release}
-Requires:	%{name}-profiles-nfv-host = %{version}-%{release}
-
-%description profiles-nfv
-Additional tuned profile(s) targeted to Network Function Virtualization (NFV).
-
-%package profiles-cpu-partitioning
-Summary:	Additional tuned profile(s) optimized for CPU partitioning
-Requires:	%{name} = %{version}-%{release}
-
-%description profiles-cpu-partitioning
-Additional tuned profile(s) optimized for CPU partitioning.
-
-%package profiles-spectrumscale
-Summary:	Additional tuned profile(s) optimized for IBM Spectrum Scale
-Requires:	%{name} = %{version}-%{release}
-
-%description profiles-spectrumscale
-Additional tuned profile(s) optimized for IBM Spectrum Scale.
-
-%package profiles-postgresql
-Summary:	Additional tuned profile(s) targeted to PostgreSQL server loads
-Requires:	%{name} = %{version}-%{release}
-
-%description profiles-postgresql
-Additional tuned profile(s) targeted to PostgreSQL server loads.
-
-%package profiles-openshift
-Summary:	Additional TuneD profile(s) optimized for OpenShift
-Requires:	%{name} = %{version}-%{release}
-
-%description profiles-openshift
-Additional TuneD profile(s) optimized for OpenShift.
+%description profiles
+Additional tuned profiles in a single package: backward-compatible tuned 1.0
+profiles, SAP NetWeaver/HANA, MS SQL Server, Oracle, Atomic, realtime, NFV
+(guest/host), CPU partitioning, IBM Spectrum Scale, PostgreSQL and OpenShift.
 
 %package ppd
 Summary:	PPD compatibility daemon
@@ -337,7 +250,8 @@ fi
 %doc %{_mandir}/man8/diskdevstat.*
 %doc %{_mandir}/man8/scomes.*
 
-%files profiles-compat
+%files profiles
+# compat
 %{system_profiles_dir}/default
 %{system_profiles_dir}/desktop-powersave
 %{system_profiles_dir}/laptop-ac-powersave
@@ -345,67 +259,47 @@ fi
 %{system_profiles_dir}/laptop-battery-powersave
 %{system_profiles_dir}/enterprise-storage
 %{system_profiles_dir}/spindown-disk
-%{_mandir}/man7/tuned-profiles-compat.7*
-
-%files profiles-sap
+# sap / sap-hana
 %{system_profiles_dir}/sap-netweaver
-%{_mandir}/man7/tuned-profiles-sap.7*
-
-%files profiles-sap-hana
 %{system_profiles_dir}/sap-hana
 %{system_profiles_dir}/sap-hana-kvm-guest
-%{_mandir}/man7/tuned-profiles-sap-hana.7*
-
-%files profiles-mssql
+# databases
 %{system_profiles_dir}/mssql
-%{_mandir}/man7/tuned-profiles-mssql.7*
-
-%files profiles-oracle
 %{system_profiles_dir}/oracle
-%{_mandir}/man7/tuned-profiles-oracle.7*
-
-%files profiles-atomic
+%{system_profiles_dir}/postgresql
+# atomic
 %{system_profiles_dir}/atomic-host
 %{system_profiles_dir}/atomic-guest
-%{_mandir}/man7/tuned-profiles-atomic.7*
-
-%files profiles-realtime
+# realtime / nfv
 %config(noreplace) %{_sysconfdir}/tuned/realtime-variables.conf
-%{system_profiles_dir}/realtime
-%{_mandir}/man7/tuned-profiles-realtime.7*
-
-%files profiles-nfv-guest
 %config(noreplace) %{_sysconfdir}/tuned/realtime-virtual-guest-variables.conf
-%{system_profiles_dir}/realtime-virtual-guest
-%{_mandir}/man7/tuned-profiles-nfv-guest.7*
-
-%files profiles-nfv-host
 %config(noreplace) %{_sysconfdir}/tuned/realtime-virtual-host-variables.conf
+%{system_profiles_dir}/realtime
+%{system_profiles_dir}/realtime-virtual-guest
 %{system_profiles_dir}/realtime-virtual-host
-%{_mandir}/man7/tuned-profiles-nfv-host.7*
-
-%files profiles-nfv
-# meta package only
-
-%files profiles-cpu-partitioning
+# cpu-partitioning
 %config(noreplace) %{_sysconfdir}/tuned/cpu-partitioning-variables.conf
 %config(noreplace) %{_sysconfdir}/tuned/cpu-partitioning-powersave-variables.conf
 %{system_profiles_dir}/cpu-partitioning
 %{system_profiles_dir}/cpu-partitioning-powersave
-%{_mandir}/man7/tuned-profiles-cpu-partitioning.7*
-
-%files profiles-spectrumscale
+# spectrum scale / openshift
 %{system_profiles_dir}/spectrumscale-ece
-%{_mandir}/man7/tuned-profiles-spectrumscale-ece.7*
-
-%files profiles-postgresql
-%{system_profiles_dir}/postgresql
-%{_mandir}/man7/tuned-profiles-postgresql.7*
-
-%files profiles-openshift
 %{system_profiles_dir}/openshift
 %{system_profiles_dir}/openshift-control-plane
 %{system_profiles_dir}/openshift-node
+# man pages
+%{_mandir}/man7/tuned-profiles-compat.7*
+%{_mandir}/man7/tuned-profiles-sap.7*
+%{_mandir}/man7/tuned-profiles-sap-hana.7*
+%{_mandir}/man7/tuned-profiles-mssql.7*
+%{_mandir}/man7/tuned-profiles-oracle.7*
+%{_mandir}/man7/tuned-profiles-atomic.7*
+%{_mandir}/man7/tuned-profiles-realtime.7*
+%{_mandir}/man7/tuned-profiles-nfv-guest.7*
+%{_mandir}/man7/tuned-profiles-nfv-host.7*
+%{_mandir}/man7/tuned-profiles-cpu-partitioning.7*
+%{_mandir}/man7/tuned-profiles-spectrumscale-ece.7*
+%{_mandir}/man7/tuned-profiles-postgresql.7*
 %{_mandir}/man7/tuned-profiles-openshift.7*
 
 %files ppd
