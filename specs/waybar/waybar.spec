@@ -1,7 +1,7 @@
 %define tarname Waybar
 Name:           waybar
 Version:	0.15.0
-Release:	3
+Release:	4
 Group:          Graphical desktop/Other
 Summary:        Customizable Wayland bar for Sway and Wlroots based compositors
 License:        MIT
@@ -57,7 +57,9 @@ Customizable Wayland bar for Sway and Wlroots based compositors.
 %meson \
         -Dtests=disabled \
         -Dcava=disabled \
-        -Dmpris=disabled
+        -Dmpris=disabled \
+        -Dlibpulse=enabled \
+        -Dwireplumber=enabled
 %meson_build
 
 %install
