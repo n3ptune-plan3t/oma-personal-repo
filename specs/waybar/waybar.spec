@@ -57,9 +57,7 @@ Customizable Wayland bar for Sway and Wlroots based compositors.
 %meson \
         -Dtests=disabled \
         -Dcava=disabled \
-        -Dmpris=disabled \
-        -Dlibpulse=enabled \
-        -Dwireplumber=enabled
+        -Dmpris=disabled
 %meson_build
 
 %install
