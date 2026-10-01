@@ -175,6 +175,7 @@ fi
 %{_sbindir}/tuned
 %{_sbindir}/tuned-adm
 
+
 # Exclude profiles that go into subpackages
 %exclude %{system_profiles_dir}/default
 %exclude %{system_profiles_dir}/desktop-powersave
@@ -251,6 +252,8 @@ fi
 %doc %{_mandir}/man8/scomes.*
 
 %files profiles
+%dir %{_sysconfdir}/systemd/system.conf.d
+%config(noreplace) %{_sysconfdir}/systemd/system.conf.d/00-tuned.conf
 # compat
 %{system_profiles_dir}/default
 %{system_profiles_dir}/desktop-powersave
