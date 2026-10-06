@@ -4,6 +4,8 @@
 %global pkgname astal
 
 %global _vpath_srcdir lib/quarrel
+%global __requires_exclude ^%{_libdir}/libquarrel.so
+
 
 %define libname %mklibname quarrel
 %define devname %mklibname quarrel -d
