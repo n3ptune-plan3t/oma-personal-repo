@@ -1,0 +1,8 @@
+{
+  "wps-office": {
+    "skip": "vendor-only RPM repack, no upstream feed to query"
+  },
+  "astal": {
+    "repo": "https://github.com/aylur/astal"
+  }
+}

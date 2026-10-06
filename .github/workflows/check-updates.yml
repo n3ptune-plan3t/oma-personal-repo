@@ -1,0 +1,52 @@
+name: Check for upstream updates
+
+on:
+  schedule:
+    - cron: '17 5 * * *'      # daily, 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check specs against upstream
+        id: check
+        run: python3 scripts/check-updates.py --json updates.json --markdown updates.md
+
+      - name: Job summary
+        run: cat updates.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create, update or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COUNT: ${{ steps.check.outputs.count }}
+          PACKAGES: ${{ steps.check.outputs.packages }}
+        run: |
+          set -eu
+          title="Upstream updates available"
+          gh label create upstream-updates --color 0e8a16 \
+            --description "Spec is behind upstream" 2>/dev/null || true
+          num=$(gh issue list --label upstream-updates --state open \
+                  --json number --jq '.[0].number // empty')
+          if [ "$COUNT" -gt 0 ]; then
+            { cat updates.md
+              echo
+              echo "Build after bumping the specs:"
+              echo '```'
+              echo "packages: $PACKAGES"
+              echo '```'; } > body.md
+            if [ -n "$num" ]; then
+              gh issue edit "$num" --body-file body.md
+            else
+              gh issue create --title "$title" --label upstream-updates \
+                --body-file body.md
+            fi
+          elif [ -n "$num" ]; then
+            gh issue close "$num" --comment "All specs are up to date."
+          fi

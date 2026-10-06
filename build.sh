@@ -610,7 +610,12 @@ echo "============================================================"
 echo " Creating repository metadata"
 echo "============================================================"
 
-createrepo_c "$ROOT/merged"
+# --baseurl writes an xml:base into the metadata so dnf downloads the RPMs
+# from the repo-rpm release while repodata/ itself is served from
+# GitHub Pages (release assets are flat and cannot hold a repodata/ dir).
+createrepo_c \
+    --baseurl "https://github.com/${REPO}/releases/download/repo-rpm/" \
+    "$ROOT/merged"
 
 # ============================================================
 # Final verification

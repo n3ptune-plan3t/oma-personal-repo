@@ -111,16 +111,49 @@ jobs:
                   repo-rpm "{}" --yes || true
           done
 
-      - name: Publish rolling repo release
+      - name: Publish rolling repo release (RPMs only)
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           tag_name: repo-rpm
           name: "Personal repo snapshot (RPM)"
-          files: |
-            merged/*.rpm
-            merged/repodata/*
+          files: merged/*.rpm
+
+      # Release assets are flat, so dnf cannot read repodata/ from the
+      # release. Serve it from GitHub Pages (gh-pages branch) instead;
+      # the metadata's xml:base points back at the release for the RPMs.
+      - name: Publish repodata to gh-pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          pages=$(mktemp -d)
+          cp -r merged/repodata "$pages/repodata"
+          touch "$pages/.nojekyll"
+          cd "$pages"
+          git init -q -b gh-pages
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Update repodata (${{ matrix.package }})"
+          git remote add origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          git push -f origin gh-pages
+
+      # Legacy cleanup: earlier runs uploaded repomd.xml and the
+      # hash-named primary/filelists/other files as release assets.
+      - name: Remove old metadata assets from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view repo-rpm \
+            --repo "${{ github.repository }}" \
+            --json assets --jq '.assets[].name' 2>/dev/null \
+            | grep -E '(^repomd\.xml|-(primary|filelists|other)\.(xml|sqlite)(\.(gz|zst|bz2|xz))?)$' \
+            | xargs -r -I{} gh release delete-asset repo-rpm "{}" \
+                --yes --repo "${{ github.repository }}" || true
 
       - name: Upload built package
         uses: actions/upload-artifact@v4
